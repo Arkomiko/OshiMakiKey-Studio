@@ -203,22 +203,18 @@ public sealed class AppSettings
         Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Direct;
 
     /// <summary>
-    /// Номера кнопок ручки в прошивке: поворот влево, нажатие, поворот вправо. По умолчанию — как у
-    /// ch57x-keyboard-tool (13, 14, 15); мастер подбора заменяет их найденными на конкретной плате.
+    /// Номера кнопок ручки в прошивке: поворот влево, нажатие, поворот вправо. По умолчанию для прямого формата —
+    /// 11, 12, 13 (измерено на CH552 6 клавиш + ручка), для остальных — как у ch57x-keyboard-tool (13, 14, 15).
+    /// Мастер проверки записи заменяет их найденными на конкретной плате.
     /// </summary>
     public List<int>? KnobSlots { get; set; }
 
     public byte SlotOf(ControlId control)
     {
         int knob = Array.IndexOf(new[] { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight }, control);
-        if (knob >= 0 && KnobSlots is { Count: 3 } slots && slots[knob] is > 0 and < 0xA0) return (byte)slots[knob];
-        return control switch
-        {
-            ControlId.KnobLeft => 13,
-            ControlId.KnobPress => 14,
-            ControlId.KnobRight => 15,
-            _ => (byte)(control - ControlId.Key1 + 1),
-        };
+        if (knob < 0) return (byte)(control - ControlId.Key1 + 1);
+        if (KnobSlots is { Count: 3 } slots && slots[knob] is > 0 and < 0xA0) return (byte)slots[knob];
+        return (byte)((EffectiveProtocol == ProtocolMode.Direct ? 11 : 13) + knob);
     }
 
     /// <summary>Слои есть только в формате ch57x — для остальных записывается только первый.</summary>

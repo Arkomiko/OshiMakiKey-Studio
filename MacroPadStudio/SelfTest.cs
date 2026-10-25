@@ -87,7 +87,7 @@ internal static class SelfTest
         Packets("Прямой: пример профиля целиком", ProfileCompiler.Compile(direct),
             "01 01 00 06", "02 01 00 19", "03 01 00 1d",
             "04 00 00 68", "05 00 00 69", "06 00 00 6a",
-            "0d 00 00 6b", "0e 00 00 6c", "0f 00 00 6d",
+            "0b 00 00 6b", "0c 00 00 6c", "0d 00 00 6d",
             "aa aa");
         direct.KnobSlots = new List<int> { 16, 17, 15 };
         Check("Прямой: найденные номера ручки используются при записи",

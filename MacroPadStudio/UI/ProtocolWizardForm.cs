@@ -393,7 +393,7 @@ internal sealed class ProtocolWizardForm : Form
     {
         string? text = input switch
         {
-            RawKeyboardEvent key => $"{(key.Up ? "↑" : "↓")}{key.Key}",
+            RawKeyboardEvent key => $"{key.Key}:{(key.Up ? "отпущена" : "нажата")}",
             RawHidEvent hid => hid.Report.Any(b => b != 0) ? $"мм[{Convert.ToHexString(hid.Report)}]" : "мм0",
             RawMouseEvent mouse when mouse.ButtonFlags != 0 => $"мышь{mouse.ButtonFlags:X4}{(mouse.WheelDelta != 0 ? $"({mouse.WheelDelta})" : "")}",
             _ => null,

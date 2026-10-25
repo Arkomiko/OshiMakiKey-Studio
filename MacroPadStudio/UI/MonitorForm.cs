@@ -231,7 +231,7 @@ internal sealed class MonitorForm : Form
 
     static string? Describe(RawEvent input) => input switch
     {
-        RawKeyboardEvent key => $"Клавиатура   {(key.Up ? "↑" : "↓")} {KeyName(key.Key),-14} скан-код {(key.Extended ? "E0 " : "")}{key.MakeCode:X2}",
+        RawKeyboardEvent key => $"Клавиатура   {KeyName(key.Key),-14} {(key.Up ? "отпущена" : "нажата  ")}   скан-код {(key.Extended ? "E0 " : "")}{key.MakeCode:X2}",
         RawMouseEvent mouse => DescribeMouse(mouse),
         RawHidEvent hid => $"{(hid.UsagePage == 0x01 ? "Система    " : "Мультимедиа")}  {DescribeUsages(hid)}   [{Convert.ToHexString(hid.Report)}]",
         _ => null,
@@ -257,12 +257,12 @@ internal sealed class MonitorForm : Form
     static string? DescribeMouse(RawMouseEvent mouse)
     {
         var parts = new List<string>();
-        if ((mouse.ButtonFlags & 0x0001) != 0) parts.Add("↓ левая");
-        if ((mouse.ButtonFlags & 0x0002) != 0) parts.Add("↑ левая");
-        if ((mouse.ButtonFlags & 0x0004) != 0) parts.Add("↓ правая");
-        if ((mouse.ButtonFlags & 0x0008) != 0) parts.Add("↑ правая");
-        if ((mouse.ButtonFlags & 0x0010) != 0) parts.Add("↓ средняя");
-        if ((mouse.ButtonFlags & 0x0020) != 0) parts.Add("↑ средняя");
+        if ((mouse.ButtonFlags & 0x0001) != 0) parts.Add("левая нажата");
+        if ((mouse.ButtonFlags & 0x0002) != 0) parts.Add("левая отпущена");
+        if ((mouse.ButtonFlags & 0x0004) != 0) parts.Add("правая нажата");
+        if ((mouse.ButtonFlags & 0x0008) != 0) parts.Add("правая отпущена");
+        if ((mouse.ButtonFlags & 0x0010) != 0) parts.Add("средняя нажата");
+        if ((mouse.ButtonFlags & 0x0020) != 0) parts.Add("средняя отпущена");
         if ((mouse.ButtonFlags & 0x0400) != 0) parts.Add($"колесо {(mouse.WheelDelta > 0 ? "вверх" : "вниз")} ({mouse.WheelDelta})");
         // Простое движение обычной мыши не показываем — иначе журнал утонет в нём.
         return parts.Count == 0 ? null : "Мышь         " + string.Join(", ", parts);

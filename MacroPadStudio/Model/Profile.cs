@@ -200,7 +200,26 @@ public sealed class AppSettings
     public ProtocolMode? DetectedProtocol { get; set; }
 
     public ProtocolMode EffectiveProtocol =>
-        Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Vendor;
+        Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Direct;
+
+    /// <summary>
+    /// Номера кнопок ручки в прошивке: поворот влево, нажатие, поворот вправо. По умолчанию — как у
+    /// ch57x-keyboard-tool (13, 14, 15); мастер подбора заменяет их найденными на конкретной плате.
+    /// </summary>
+    public List<int>? KnobSlots { get; set; }
+
+    public byte SlotOf(ControlId control)
+    {
+        int knob = Array.IndexOf(new[] { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight }, control);
+        if (knob >= 0 && KnobSlots is { Count: 3 } slots && slots[knob] is > 0 and < 0xA0) return (byte)slots[knob];
+        return control switch
+        {
+            ControlId.KnobLeft => 13,
+            ControlId.KnobPress => 14,
+            ControlId.KnobRight => 15,
+            _ => (byte)(control - ControlId.Key1 + 1),
+        };
+    }
 
     /// <summary>Слои есть только в формате ch57x — для остальных записывается только первый.</summary>
     public int EffectiveLayerCount => EffectiveProtocol == ProtocolMode.Legacy ? LayerCount : 1;
@@ -224,16 +243,16 @@ public enum ProtocolMode
 {
     Auto,
 
-    /// <summary>Формат padclaude: прошивка хранит готовый HID-отчёт клавиатуры для каждой кнопки.</summary>
+    /// <summary>
+    /// Прямой: кадр [кнопка][готовый HID-отчёт клавиатуры]. Так работает CH552 6 клавиш + ручка с битовым
+    /// мультимедиа-интерфейсом — сама плата хранит одно сочетание клавиш на кнопку.
+    /// </summary>
     Direct,
 
     /// <summary>Формат ch57x-keyboard-tool (k8890): клавиши, мультимедиа и мышь разбирает сама прошивка.</summary>
     Legacy,
 
-    /// <summary>
-    /// Формат официальной программы для плат без Report ID («версия 0»): без префикса 0x03 и без слоёв.
-    /// Так официальная программа пишет платы, у которых, как у CH552 6 клавиш + ручка, нет Report ID.
-    /// </summary>
+    /// <summary>Формат официальной программы для плат без Report ID («версия 0»): без префикса 0x03 и без слоёв.</summary>
     Vendor,
 }
 

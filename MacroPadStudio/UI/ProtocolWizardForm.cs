@@ -1,4 +1,3 @@
-using System.Text;
 using OshiMakiKey.Agent;
 using OshiMakiKey.Device;
 using OshiMakiKey.Model;
@@ -6,27 +5,20 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.UI;
 
 /// <summary>
-/// Мастер подбора способа записи с пошаговой диагностикой. Платы с одним USB ID 1189:8890 прошиты по-разному,
-/// и формат можно узнать только опытом. Мастер просит нажимать каждый элемент по очереди и записывает в журнал,
-/// что именно он прислал: сначала в исходном состоянии, затем после каждого варианта записи (перед записью —
-/// переподключение кабеля). У каждого варианта свои тестовые буквы, поэтому по ним видно, чья запись сработала.
+/// Мастер проверки записи. Пишет в плату прямым форматом тестовые буквы — в кнопки 1–6 и во все кнопки,
+/// где может оказаться ручка (7–21), у каждой своя буква, — затем просит нажать каждую клавишу и ручку.
+/// По пришедшим буквам видно, работает ли запись, и какие номера у поворотов и нажатия ручки на этой плате.
+/// Всё, что прислала плата, пишется в журнал.
 /// </summary>
 internal sealed class ProtocolWizardForm : Form
 {
-    sealed record Variant(ProtocolMode Mode, string Title, string KeyLetters, string KnobLetters);
+    abstract record Step;
+    sealed record PressStep(ControlId Control) : Step;
+    sealed record ReplugStep : Step;
+    sealed record WriteStep : Step;
 
-    abstract record Step(int Variant);
-    sealed record PressStep(int Variant, ControlId Control) : Step(Variant);
-    sealed record ReplugStep(int Variant) : Step(Variant);
-    sealed record WriteStep(int Variant) : Step(Variant);
-
-    // Буквы у вариантов не пересекаются: по одной букве видно, чья запись сработала.
-    static readonly Variant[] Variants =
-    {
-        new(ProtocolMode.Direct, "прямой (формат padclaude)", "abcdef", "ghi"),
-        new(ProtocolMode.Vendor, "как у официальной программы", "jklmno", "pqr"),
-        new(ProtocolMode.Legacy, "формат ch57x-keyboard-tool", "stuvwx", "yz1"),
-    };
+    const int FirstProbeSlot = 1;
+    const int LastProbeSlot = 21; // 12 клавиш + 3 ручки × 3 действия — столько кнопок у этого семейства прошивок
 
     static readonly ControlId[] KeyIds = { ControlId.Key1, ControlId.Key2, ControlId.Key3, ControlId.Key4, ControlId.Key5, ControlId.Key6 };
     static readonly ControlId[] KnobIds = { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight };
@@ -48,19 +40,23 @@ internal sealed class ProtocolWizardForm : Form
     readonly StreamWriter? _file;
     readonly List<Step> _steps = new();
     readonly List<string> _captured = new();
-    readonly int[] _keyHits = new int[Variants.Length];
-    readonly HashSet<ControlId> _knobHits = new();
+    readonly Dictionary<ControlId, int> _slotSeen = new();
+    readonly Dictionary<ControlId, int> _letterCount = new();
     int _index = -1;
     bool _started;
     bool _sawRemoval;
     bool _busy;
+    string? _savedPath;
 
-    /// <summary>Подобранный способ записи (null — не найден или мастер закрыт).</summary>
+    /// <summary>Подходящий способ записи (null — запись не сработала или мастер закрыт).</summary>
     public ProtocolMode? Result { get; private set; }
+
+    /// <summary>Найденные номера кнопок ручки: влево, нажатие, вправо (null — не найдены).</summary>
+    public List<int>? KnobSlots { get; private set; }
 
     public ProtocolWizardForm()
     {
-        Text = "Подбор способа записи — " + Branding.AppName;
+        Text = "Проверка записи — " + Branding.AppName;
         Icon = Theme.AppIcon;
         Font = Theme.Body;
         BackColor = Theme.Surface;
@@ -131,8 +127,11 @@ internal sealed class ProtocolWizardForm : Form
 
         _file = LogFiles.OpenAppend(LogFiles.MonitorLog, out string? logError);
 
-        BuildSteps();
-        Log($"──── Диагностика открыта {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
+        _steps.Add(new ReplugStep());
+        _steps.Add(new WriteStep());
+        foreach (var control in AllControls) _steps.Add(new PressStep(control));
+
+        Log($"──── Проверка записи открыта {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
         if (logError != null) Log("Не удалось открыть monitor.log: " + logError + " — протокол сохранится отдельным файлом");
         ShowIntro();
         UpdateDeviceStatus();
@@ -152,28 +151,32 @@ internal sealed class ProtocolWizardForm : Form
         button.FlatAppearance.MouseOverBackColor = primary ? Theme.AccentDark : Theme.Hover;
     }
 
-    void BuildSteps()
+    // ───────────────────────── Тестовые буквы ─────────────────────────
+
+    /// <summary>Буква для кнопки с номером slot: 1 → a, 2 → b, …, 21 → u.</summary>
+    static byte CodeForSlot(int slot) => (byte)(0x04 + slot - FirstProbeSlot);
+
+    static int? SlotForCode(byte code) =>
+        code >= CodeForSlot(FirstProbeSlot) && code <= CodeForSlot(LastProbeSlot) ? code - 0x04 + FirstProbeSlot : null;
+
+    static List<byte[]> ProbePackets()
     {
-        // Исходное состояние, затем для каждого варианта: переподключить → записать → нажать всё по очереди.
-        foreach (var control in AllControls) _steps.Add(new PressStep(-1, control));
-        for (int v = 0; v < Variants.Length; v++)
-        {
-            _steps.Add(new ReplugStep(v));
-            _steps.Add(new WriteStep(v));
-            foreach (var control in AllControls) _steps.Add(new PressStep(v, control));
-        }
+        var packets = new List<byte[]>();
+        for (int slot = FirstProbeSlot; slot <= LastProbeSlot; slot++)
+            packets.Add(DirectProtocol.Bind((byte)slot, 0, new[] { CodeForSlot(slot) }));
+        packets.Add(DirectProtocol.Close());
+        return packets;
     }
 
     // ───────────────────────── Шаги ─────────────────────────
 
     void ShowIntro()
     {
-        _title.Text = "Подбор способа записи";
+        _title.Text = "Проверка записи";
         _progress.Text = "";
-        _text.Text = "Мастер попросит нажимать каждую клавишу и ручку по очереди и запишет, что они присылают: " +
-                     "сначала как есть, потом после каждого из трёх вариантов записи. Перед каждой записью нужно " +
-                     "отключить и снова подключить USB-кабель клавиатуры — мастер это увидит сам.\n\n" +
-                     "Это займёт около трёх минут. Клавиши во время проверки могут печатать буквы — это нормально.";
+        _text.Text = "Мастер запишет в клавиатуру тестовые буквы и попросит по очереди нажать каждую клавишу и ручку. " +
+                     "По буквам он поймёт, работает ли запись и какие номера у ручки на вашей плате.\n\n" +
+                     "Сначала нужно отключить и снова подключить USB-кабель — мастер это увидит сам. Около минуты.";
         _received.Text = "";
         _primary.Text = "Начать";
         _primary.Visible = true;
@@ -184,13 +187,6 @@ internal sealed class ProtocolWizardForm : Form
     {
         _quiet.Stop();
         _index++;
-
-        // Вариант сработал — нажатия по нему уже собраны, дальше проверять незачем.
-        if (_index < _steps.Count && _steps[_index] is ReplugStep && Result != null)
-        {
-            Finish();
-            return;
-        }
         if (_index >= _steps.Count)
         {
             Finish();
@@ -198,8 +194,7 @@ internal sealed class ProtocolWizardForm : Form
         }
 
         var step = _steps[_index];
-        string stage = step.Variant < 0 ? "Исходное состояние" : $"Вариант {step.Variant + 1} из {Variants.Length}: {Variants[step.Variant].Title}";
-        _title.Text = stage;
+        _title.Text = "Проверка записи";
         _progress.Text = $"Шаг {_index + 1} из {_steps.Count}";
         _received.Text = "";
         _primary.Visible = false;
@@ -218,10 +213,10 @@ internal sealed class ProtocolWizardForm : Form
                 _skip.Text = "Пропустить";
                 _skip.Visible = true;
                 break;
-            case WriteStep write:
+            case WriteStep:
                 _skip.Visible = false;
                 _text.Text = "Записываю тестовые буквы…";
-                RunWrite(write.Variant);
+                RunWrite();
                 break;
         }
     }
@@ -229,37 +224,35 @@ internal sealed class ProtocolWizardForm : Form
     static string PressPrompt(ControlId control) => control switch
     {
         ControlId.KnobLeft => "Поверните ручку ВЛЕВО на один щелчок.",
-        ControlId.KnobPress => "НАЖМИТЕ на ручку.",
+        ControlId.KnobPress => "НАЖМИТЕ на ручку один раз.",
         ControlId.KnobRight => "Поверните ручку ВПРАВО на один щелчок.",
-        _ => $"Нажмите клавишу {UiText.KeyNumber(control)}.",
+        _ => $"Нажмите клавишу {UiText.KeyNumber(control)} один раз.",
     };
 
-    async void RunWrite(int variantIndex)
+    async void RunWrite()
     {
-        var variant = Variants[variantIndex];
         var device = MacroPadDevice.FindConfigInterface();
         if (device == null)
         {
-            Log($"Вариант {variantIndex + 1}: клавиатура не подключена, запись пропущена");
+            Log("Клавиатура не подключена, запись пропущена");
             Next();
             return;
         }
 
-        var packets = ProfileCompiler.Compile(TestSettings(variant));
-        bool sendInit = ProfileCompiler.SendsInitPacket(variant.Mode);
+        var packets = ProbePackets();
         _busy = true;
         try
         {
             await Task.Run(() =>
             {
                 using var pad = MacroPadDevice.Open(device);
-                pad.Write(packets, sendInit);
+                pad.Write(packets, sendInit: false);
             });
-            Log($"Записан вариант {variantIndex + 1} ({variant.Mode}): клавиши 1–6 → {variant.KeyLetters}, ручка ↺●↻ → {variant.KnobLetters}, кадров {packets.Count}");
+            Log($"Записан прямой формат: кнопки {FirstProbeSlot}–{LastProbeSlot} → буквы a–u (кнопка 1 = a, 7 = g, 13 = m, 15 = o, 21 = u), кадров {packets.Count}");
         }
         catch (Exception ex)
         {
-            Log($"Ошибка записи варианта {variantIndex + 1}: {ex.Message}");
+            Log("Ошибка записи: " + ex.Message);
         }
         finally
         {
@@ -272,8 +265,8 @@ internal sealed class ProtocolWizardForm : Form
     {
         _quiet.Stop();
         if (_index < 0 || _index >= _steps.Count || _steps[_index] is not PressStep press) return;
-        string label = press.Variant < 0 ? "исходно" : $"вариант {press.Variant + 1}";
-        Log($"[{label}] {UiText.Title(press.Control)} → {(_captured.Count == 0 ? "нет событий" : string.Join("  ", _captured))}");
+        string slot = _slotSeen.TryGetValue(press.Control, out int s) ? $" [кнопка прошивки {s}, букв: {_letterCount.GetValueOrDefault(press.Control)}]" : "";
+        Log($"{UiText.Title(press.Control)} → {(_captured.Count == 0 ? "нет событий" : string.Join("  ", _captured))}{slot}");
         Next();
     }
 
@@ -281,18 +274,25 @@ internal sealed class ProtocolWizardForm : Form
     {
         _quiet.Stop();
         _index = _steps.Count;
-        _title.Text = Result != null ? "Нашёлся рабочий способ!" : "Подходящий вариант не найден";
-        _progress.Text = "";
-        string hits = string.Join(", ", Variants.Select((v, i) => $"{v.Mode}: {_keyHits[i]}"));
-        string knob = _knobHits.Count == 0 ? "ручка буквы не прислала" : "ручка: " + string.Join(", ", _knobHits.Select(UiText.Title));
-        Log($"Итог: {(Result?.ToString() ?? "не найден")}; тестовых букв от клавиш — {hits}; {knob}");
+
+        bool keysWork = KeyIds.Any(_slotSeen.ContainsKey);
+        if (keysWork) Result = ProtocolMode.Direct;
+        if (KnobIds.Any(_slotSeen.ContainsKey))
+            KnobSlots = KnobIds.Select((id, i) => _slotSeen.TryGetValue(id, out int s) ? s : 13 + i).ToList();
+
+        string keys = string.Join(", ", KeyIds.Select(id => $"{UiText.KeyNumber(id)}→{(_slotSeen.TryGetValue(id, out int s) ? s.ToString() : "—")}"));
+        string knob = string.Join(", ", KnobIds.Select(id => $"{UiText.Glyph(id)}→{(_slotSeen.TryGetValue(id, out int s) ? s.ToString() : "—")}"));
+        Log($"Итог: запись {(keysWork ? "работает" : "не сработала")}; номера клавиш {keys}; номера ручки {knob}");
         string saved = SaveProtocol() is string path ? $"Протокол сохранён: user_data\\{Path.GetFileName(path)}." : "";
-        _text.Text = Result != null
-            ? $"Клавиатура понимает вариант «{Variants[Array.FindIndex(Variants, v => v.Mode == Result)].Title}». " +
+
+        _title.Text = keysWork ? "Запись работает!" : "Запись не сработала";
+        _progress.Text = "";
+        _text.Text = keysWork
+            ? $"Клавиши отвечают тестовыми буквами. Номера ручки: {knob}.\n\n" +
               $"Нажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки.\n\n{saved}"
-            : $"Ни один вариант не заставил клавиши печатать буквы. Всё, что прислала клавиатура, записано — этого хватит, чтобы разобраться дальше.\n\n{saved}";
+            : $"Клавиши не прислали тестовых букв. Всё, что прислала клавиатура, записано — этого хватит, чтобы разобраться дальше.\n\n{saved}";
         _received.Text = "";
-        _primary.Text = Result != null ? "Готово" : "Закрыть";
+        _primary.Text = keysWork ? "Готово" : "Закрыть";
         _primary.Visible = true;
         _skip.Visible = false;
     }
@@ -320,23 +320,6 @@ internal sealed class ProtocolWizardForm : Form
         else Next();
     }
 
-    /// <summary>Тестовая раскладка: каждой кнопке — своя буква этого варианта.</summary>
-    static AppSettings TestSettings(Variant variant)
-    {
-        var settings = new AppSettings { Protocol = variant.Mode };
-        settings.Normalize();
-        var layer = settings.Profile.Layers[0];
-        for (int i = 0; i < KeyIds.Length; i++) layer.Actions[KeyIds[i]] = PadAction.FromKeys(KeyChord.Of(Code(variant.KeyLetters[i])));
-        for (int i = 0; i < KnobIds.Length; i++) layer.Actions[KnobIds[i]] = PadAction.FromKeys(KeyChord.Of(Code(variant.KnobLetters[i])));
-        settings.EnsureTriggers();
-        return settings;
-    }
-
-    static byte Code(char c) => c is >= '1' and <= '9' ? (byte)(0x1E + c - '1') : c == '0' ? (byte)0x27 : (byte)(0x04 + c - 'a');
-
-    static char? Letter(byte code) =>
-        code is >= 0x04 and <= 0x1D ? (char)('a' + code - 0x04) : code is >= 0x1E and <= 0x26 ? (char)('1' + code - 0x1E) : code == 0x27 ? '0' : null;
-
     // ───────────────────────── Ввод с клавиатуры ─────────────────────────
 
     protected override void OnHandleCreated(EventArgs e)
@@ -350,14 +333,12 @@ internal sealed class ProtocolWizardForm : Form
         RawInput.Unregister();
         _quiet.Dispose();
         _replugSettle.Dispose();
-        Log("──── Диагностика закрыта");
+        Log("──── Проверка записи закрыта");
         // Мастер закрыли раньше итога — протокол всё равно сохраняем.
         if (_savedPath == null && _started) SaveProtocol();
         _file?.Dispose();
         base.OnFormClosed(e);
     }
-
-    string? _savedPath;
 
     /// <summary>Отдельный файл с полным протоколом — на случай, если monitor.log был недоступен.</summary>
     string? SaveProtocol()
@@ -403,29 +384,19 @@ internal sealed class ProtocolWizardForm : Form
         if (_index >= 0 && _index < _steps.Count && _steps[_index] is PressStep press)
         {
             _captured.Add(text);
-            _received.Text = "Получено: " + string.Join("  ", _captured);
+            _received.Text = "Получено: " + string.Join("  ", _captured.TakeLast(12));
             _quiet.Stop();
             _quiet.Start();
-            if (input is RawKeyboardEvent { Up: false } down) CountLetter(press, down.Key);
+            if (input is RawKeyboardEvent { Up: false } down && SlotForCode(KeyCatalog.FromVirtualKey(down.Key)) is int slot)
+            {
+                _slotSeen.TryAdd(press.Control, slot);
+                _letterCount[press.Control] = _letterCount.GetValueOrDefault(press.Control) + 1;
+            }
         }
         else
         {
             Log("вне шага: " + text);
         }
-    }
-
-    void CountLetter(PressStep press, Keys key)
-    {
-        if (press.Variant < 0) return;
-        char? letter = Letter(KeyCatalog.FromVirtualKey(key));
-        if (letter == null) return;
-        var variant = Variants[press.Variant];
-        if (variant.KeyLetters.Contains(letter.Value))
-        {
-            _keyHits[press.Variant]++;
-            Result ??= variant.Mode;
-        }
-        if (variant.KnobLetters.Contains(letter.Value)) _knobHits.Add(KnobIds[variant.KnobLetters.IndexOf(letter.Value)]);
     }
 
     void OnDeviceChange()

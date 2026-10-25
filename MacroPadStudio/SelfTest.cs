@@ -75,21 +75,23 @@ internal static class SelfTest
         var systemPackets = ProfileCompiler.ToHardware(new PadAction { Kind = ActionKind.System, TriggerSlot = 25 });
         Check("Системное действие → Ctrl + F14", systemPackets is KeysAction { Presses: [(0x01, 0x69)] });
 
-        // Прямой протокол (новая ревизия): кадр = [03][кнопка][модификаторы][00][коды…], обрамление A1 … AA AA.
-        Packets("Прямой: Ctrl+C на клавише 1", new List<byte[]> { DirectProtocol.Bind(ControlId.Key1, 0x01, new[] { KeyCatalog.C }) },
-            "03 01 01 00 06");
-        Packets("Прямой: пустая кнопка", new List<byte[]> { DirectProtocol.Bind(ControlId.KnobPress, 0, Array.Empty<byte>()) }, "03 0e");
-        Packets("Прямой: открыть и сохранить", new List<byte[]> { DirectProtocol.Open(), DirectProtocol.Close() }, "03 a1 01", "03 aa aa");
+        // Прямой протокол: кадр = [кнопка][модификаторы][00][коды…] (готовый HID-отчёт), в конце AA AA.
+        Packets("Прямой: Ctrl+C на клавише 1", new List<byte[]> { DirectProtocol.Bind(1, 0x01, new[] { KeyCatalog.C }) },
+            "01 01 00 06");
+        Packets("Прямой: пустая кнопка", new List<byte[]> { DirectProtocol.Bind(14, 0, Array.Empty<byte>()) }, "0e");
+        Packets("Прямой: сохранить", new List<byte[]> { DirectProtocol.Close() }, "aa aa");
 
         var direct = new AppSettings { Protocol = ProtocolMode.Direct };
         direct.Normalize();
         // Пример профиля: клавиши 1–3 — сочетания (их хранит само устройство), клавиши 4–6 и ручка — мультимедиа (через агента).
         Packets("Прямой: пример профиля целиком", ProfileCompiler.Compile(direct),
-            "03 a1 01",
-            "03 01 01 00 06", "03 02 01 00 19", "03 03 01 00 1d",
-            "03 04 00 00 68", "03 05 00 00 69", "03 06 00 00 6a",
-            "03 0d 00 00 6b", "03 0e 00 00 6c", "03 0f 00 00 6d",
-            "03 aa aa");
+            "01 01 00 06", "02 01 00 19", "03 01 00 1d",
+            "04 00 00 68", "05 00 00 69", "06 00 00 6a",
+            "0d 00 00 6b", "0e 00 00 6c", "0f 00 00 6d",
+            "aa aa");
+        direct.KnobSlots = new List<int> { 16, 17, 15 };
+        Check("Прямой: найденные номера ручки используются при записи",
+            ProfileCompiler.Compile(direct)[6][0] == 16 && ProfileCompiler.Compile(direct)[7][0] == 17 && ProfileCompiler.Compile(direct)[8][0] == 15);
         Check("Прямой: без пустого кадра в начале", !ProfileCompiler.SendsInitPacket(ProtocolMode.Direct));
         Check("Прямой: одно сочетание — само устройство",
             !Execution.NeedsAgent(PadAction.FromKeys(KeyChord.Of(KeyCatalog.C, ctrl: true)), ProtocolMode.Direct));

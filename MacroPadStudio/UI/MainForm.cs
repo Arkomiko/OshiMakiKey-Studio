@@ -122,11 +122,11 @@ internal sealed class MainForm : Form
         device.DropDownItems.Add(new ToolStripMenuItem("Обновить состояние", null, (_, _) => RefreshDevice()));
         device.DropDownItems.Add(new ToolStripSeparator());
 
-        device.DropDownItems.Add(new ToolStripMenuItem("Подобрать способ записи…", null, (_, _) => ShowWizard()));
+        device.DropDownItems.Add(new ToolStripMenuItem("Проверить запись…", null, (_, _) => ShowWizard()));
         var protocol = new ToolStripMenuItem("Способ записи");
         AddProtocolItem(protocol, ProtocolMode.Auto, "Определять автоматически");
+        AddProtocolItem(protocol, ProtocolMode.Direct, "Прямой — CH552 6 клавиш + ручка");
         AddProtocolItem(protocol, ProtocolMode.Vendor, "Как у официальной программы (без префикса 03)");
-        AddProtocolItem(protocol, ProtocolMode.Direct, "Прямой (формат padclaude)");
         AddProtocolItem(protocol, ProtocolMode.Legacy, "Совместимый с ch57x-keyboard-tool");
         device.DropDownItems.Add(protocol);
 
@@ -296,7 +296,7 @@ internal sealed class MainForm : Form
         menu.Items.Add(open);
         menu.Items.Add(new ToolStripMenuItem("Записать в устройство", null, async (_, _) => await WriteToDeviceAsync()));
         menu.Items.Add(new ToolStripMenuItem("Монитор нажатий…", null, (_, _) => ShowMonitor()));
-        menu.Items.Add(new ToolStripMenuItem("Подобрать способ записи…", null, (_, _) => ShowWizard()));
+        menu.Items.Add(new ToolStripMenuItem("Проверить запись…", null, (_, _) => ShowWizard()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Выход", null, (_, _) => ExitApp()));
 
@@ -490,6 +490,7 @@ internal sealed class MainForm : Form
         }
 
         _settings.Protocol = mode;
+        if (wizard.KnobSlots != null) _settings.KnobSlots = wizard.KnobSlots;
         AfterProtocolChanged();
         RefreshDevice();
         if (MessageBox.Show(this, $"Способ записи «{ProtocolTitle(mode)}» сохранён.\n\nЗаписать в клавиатуру ваши настройки?",

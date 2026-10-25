@@ -29,7 +29,7 @@ public static class ProfileCompiler
 
     static List<byte[]> CompileDirect(AppSettings settings)
     {
-        var packets = new List<byte[]> { DirectProtocol.Open() };
+        var packets = new List<byte[]>();
         foreach (var id in Enum.GetValues<ControlId>())
         {
             var action = settings.Profile.Layers[0].Get(id);
@@ -37,9 +37,10 @@ public static class ProfileCompiler
                 ? TriggerKeys.Chord(slot)
                 : action.Kind == ActionKind.Keys ? action.Chords.FirstOrDefault(c => !c.IsEmpty) : null;
 
+            byte button = settings.SlotOf(id);
             packets.Add(chord == null
-                ? DirectProtocol.Bind(id, 0, Array.Empty<byte>())
-                : DirectProtocol.Bind(id, chord.ModifierMask, chord.Key == 0 ? Array.Empty<byte>() : new[] { chord.Key }));
+                ? DirectProtocol.Bind(button, 0, Array.Empty<byte>())
+                : DirectProtocol.Bind(button, chord.ModifierMask, chord.Key == 0 ? Array.Empty<byte>() : new[] { chord.Key }));
         }
         packets.Add(DirectProtocol.Close());
         return packets;

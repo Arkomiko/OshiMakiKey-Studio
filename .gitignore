@@ -1,0 +1,13 @@
+# Данные пользователя и журналы (portable-папка программы)
+user_data/
+*.log
+
+# Сборка
+bin/
+obj/
+publish/
+*.pdb
+
+# IDE
+.vs/
+*.user

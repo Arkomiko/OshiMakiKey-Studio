@@ -34,15 +34,16 @@ public sealed class MacroPadDevice : IDisposable
     }
 
     /// <summary>
-    /// Определяет ревизию по мультимедиа-интерфейсу: у «прямой» ревизии он битовый (только кнопки, без значений),
-    /// у моделей формата ch57x — 16-битный код. Null — устройство не найдено.
+    /// Предполагает формат по мультимедиа-интерфейсу. Битовый (только кнопки, без значений) — у плат без Report ID,
+    /// которые официальная программа пишет «версией 0». 16-битный код — у моделей формата ch57x.
+    /// Точно формат определяет только мастер подбора. Null — устройство не найдено.
     /// </summary>
     public static ProtocolMode? DetectProtocol()
     {
         foreach (var (vid, pid) in Supported)
         {
             var consumer = HidEnumerator.Enumerate(vid, pid).FirstOrDefault(d => d.UsagePage == 0x0C);
-            if (consumer != null) return consumer.InputValueCaps == 0 ? ProtocolMode.Direct : ProtocolMode.Legacy;
+            if (consumer != null) return consumer.InputValueCaps == 0 ? ProtocolMode.Vendor : ProtocolMode.Legacy;
         }
         return null;
     }

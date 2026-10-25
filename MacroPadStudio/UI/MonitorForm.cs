@@ -127,6 +127,8 @@ internal sealed class MonitorForm : Form
     {
         base.OnHandleCreated(e);
         if (RawInput.Register(Handle) is string error) Append("ОШИБКА подписки на ввод: " + error);
+        int padCollections = RawInput.DeviceNames().Count(n => n.Contains(DeviceTag, StringComparison.OrdinalIgnoreCase));
+        Append($"★ Raw Input видит коллекций макро-клавиатуры: {padCollections}");
         StartReaders();
     }
 

@@ -6,40 +6,54 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.UI;
 
 /// <summary>
-/// «Мастер подбора способа записи». Платы с одним и тем же USB ID 1189:8890 прошиты по-разному, и узнать
-/// формат можно только опытом: мастер по очереди записывает каждый вариант со своим набором тестовых букв,
-/// просит переподключить кабель и нажать клавишу 1, а по пришедшей букве понимает, какой вариант сработал.
+/// Мастер подбора способа записи с пошаговой диагностикой. Платы с одним USB ID 1189:8890 прошиты по-разному,
+/// и формат можно узнать только опытом. Мастер просит нажимать каждый элемент по очереди и записывает в журнал,
+/// что именно он прислал: сначала в исходном состоянии, затем после каждого варианта записи (перед записью —
+/// переподключение кабеля). У каждого варианта свои тестовые буквы, поэтому по ним видно, чья запись сработала.
 /// </summary>
 internal sealed class ProtocolWizardForm : Form
 {
     sealed record Variant(ProtocolMode Mode, string Title, string KeyLetters, string KnobLetters);
 
-    // Буквы у вариантов не пересекаются: по одной нажатой клавише видно, чья запись сработала.
+    abstract record Step(int Variant);
+    sealed record PressStep(int Variant, ControlId Control) : Step(Variant);
+    sealed record ReplugStep(int Variant) : Step(Variant);
+    sealed record WriteStep(int Variant) : Step(Variant);
+
+    // Буквы у вариантов не пересекаются: по одной букве видно, чья запись сработала.
     static readonly Variant[] Variants =
     {
-        new(ProtocolMode.Direct, "прямой (новая ревизия CH552)", "abcdef", "ghi"),
+        new(ProtocolMode.Direct, "прямой (формат padclaude)", "abcdef", "ghi"),
         new(ProtocolMode.Vendor, "как у официальной программы", "jklmno", "pqr"),
         new(ProtocolMode.Legacy, "формат ch57x-keyboard-tool", "stuvwx", "yz1"),
     };
 
     static readonly ControlId[] KeyIds = { ControlId.Key1, ControlId.Key2, ControlId.Key3, ControlId.Key4, ControlId.Key5, ControlId.Key6 };
     static readonly ControlId[] KnobIds = { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight };
-
-    enum Stage { Intro, Writing, WaitKey, Knob, Done, Failed }
+    static readonly ControlId[] AllControls = KeyIds.Concat(KnobIds).ToArray();
 
     const string DeviceTag = "VID_1189&PID_8890";
+    const int QuietMs = 700;
 
     readonly Label _title = new();
     readonly Label _text = new();
+    readonly Label _progress = new();
     readonly Label _device = new();
     readonly Label _received = new();
     readonly ListBox _log = new();
     readonly Button _primary = new();
     readonly Button _skip = new();
+    readonly System.Windows.Forms.Timer _quiet = new() { Interval = QuietMs };
+    readonly System.Windows.Forms.Timer _replugSettle = new() { Interval = 1500 };
     readonly StreamWriter? _file;
-    readonly HashSet<ControlId> _knobSeen = new();
-    Stage _stage = Stage.Intro;
-    int _variant;
+    readonly List<Step> _steps = new();
+    readonly List<string> _captured = new();
+    readonly int[] _keyHits = new int[Variants.Length];
+    readonly HashSet<ControlId> _knobHits = new();
+    int _index = -1;
+    bool _started;
+    bool _sawRemoval;
+    bool _busy;
 
     /// <summary>Подобранный способ записи (null — не найден или мастер закрыт).</summary>
     public ProtocolMode? Result { get; private set; }
@@ -54,37 +68,41 @@ internal sealed class ProtocolWizardForm : Form
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
-        ClientSize = new Size(Theme.S(640), Theme.S(560));
+        ClientSize = new Size(Theme.S(680), Theme.S(600));
         KeyPreview = true;
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(Theme.S(24), Theme.S(20), Theme.S(24), Theme.S(16)),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (int i = 0; i < 4; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (int i = 0; i < 5; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _title.AutoSize = true;
         _title.Font = Theme.Title;
-        _title.Margin = new Padding(0, 0, 0, Theme.S(10));
+        _title.Margin = new Padding(0, 0, 0, Theme.S(4));
+        _progress.AutoSize = true;
+        _progress.ForeColor = Theme.Muted;
+        _progress.Margin = new Padding(0, 0, 0, Theme.S(12));
         foreach (var label in new[] { _text, _device, _received })
         {
             label.AutoSize = true;
-            label.MaximumSize = new Size(Theme.S(590), 0);
+            label.MaximumSize = new Size(Theme.S(630), 0);
             label.Margin = new Padding(0, 0, 0, Theme.S(10));
         }
+        _text.Font = Theme.Subtitle;
         _device.Font = Theme.Strong;
-        _received.Font = Theme.Strong;
         _received.ForeColor = Theme.AccentDark;
 
         _log.Dock = DockStyle.Fill;
         _log.Font = new Font("Consolas", 9f);
         _log.IntegralHeight = false;
+        _log.HorizontalScrollbar = true;
 
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, Margin = new Padding(0, Theme.S(10), 0, 0) };
         StyleButton(_primary, primary: true);
@@ -95,12 +113,21 @@ internal sealed class ProtocolWizardForm : Form
         buttons.Controls.Add(_skip);
 
         root.Controls.Add(_title, 0, 0);
-        root.Controls.Add(_text, 0, 1);
-        root.Controls.Add(_device, 0, 2);
-        root.Controls.Add(_received, 0, 3);
-        root.Controls.Add(_log, 0, 4);
-        root.Controls.Add(buttons, 0, 5);
+        root.Controls.Add(_progress, 0, 1);
+        root.Controls.Add(_text, 0, 2);
+        root.Controls.Add(_device, 0, 3);
+        root.Controls.Add(_received, 0, 4);
+        root.Controls.Add(_log, 0, 5);
+        root.Controls.Add(buttons, 0, 6);
         Controls.Add(root);
+
+        _quiet.Tick += (_, _) => FinishPress();
+        _replugSettle.Tick += (_, _) =>
+        {
+            _replugSettle.Stop();
+            Log("Плата переподключена");
+            Next();
+        };
 
         try
         {
@@ -112,7 +139,8 @@ internal sealed class ProtocolWizardForm : Form
             _file = null;
         }
 
-        Log($"──── Мастер подбора открыт {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
+        BuildSteps();
+        Log($"──── Диагностика открыта {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
         ShowIntro();
         UpdateDeviceStatus();
     }
@@ -131,46 +159,102 @@ internal sealed class ProtocolWizardForm : Form
         button.FlatAppearance.MouseOverBackColor = primary ? Theme.AccentDark : Theme.Hover;
     }
 
+    void BuildSteps()
+    {
+        // Исходное состояние, затем для каждого варианта: переподключить → записать → нажать всё по очереди.
+        foreach (var control in AllControls) _steps.Add(new PressStep(-1, control));
+        for (int v = 0; v < Variants.Length; v++)
+        {
+            _steps.Add(new ReplugStep(v));
+            _steps.Add(new WriteStep(v));
+            foreach (var control in AllControls) _steps.Add(new PressStep(v, control));
+        }
+    }
+
     // ───────────────────────── Шаги ─────────────────────────
 
     void ShowIntro()
     {
-        _stage = Stage.Intro;
         _title.Text = "Подбор способа записи";
-        _text.Text = "Платы с этим USB ID прошиты по-разному. Мастер по очереди запишет до трёх вариантов " +
-                     "с тестовыми буквами и после каждого попросит:\n\n" +
-                     "  1. отключить USB-кабель клавиатуры и подключить снова;\n" +
-                     "  2. нажать клавишу 1.\n\n" +
-                     "Пока идёт подбор, клавиши будут печатать буквы — это нормально. В конце мастер запишет ваши настройки.";
+        _progress.Text = "";
+        _text.Text = "Мастер попросит нажимать каждую клавишу и ручку по очереди и запишет, что они присылают: " +
+                     "сначала как есть, потом после каждого из трёх вариантов записи. Перед каждой записью нужно " +
+                     "отключить и снова подключить USB-кабель клавиатуры — мастер это увидит сам.\n\n" +
+                     "Это займёт около трёх минут. Клавиши во время проверки могут печатать буквы — это нормально.";
         _received.Text = "";
         _primary.Text = "Начать";
         _primary.Visible = true;
         _skip.Visible = false;
     }
 
-    async void StartVariant(int index)
+    void Next()
     {
-        _variant = index;
-        var variant = Variants[index];
-        _stage = Stage.Writing;
-        _title.Text = $"Вариант {index + 1} из {Variants.Length}: {variant.Title}";
-        _text.Text = "Записываю тестовые буквы в клавиатуру…";
+        _quiet.Stop();
+        _index++;
+
+        // Вариант сработал — нажатия по нему уже собраны, дальше проверять незачем.
+        if (_index < _steps.Count && _steps[_index] is ReplugStep && Result != null)
+        {
+            Finish();
+            return;
+        }
+        if (_index >= _steps.Count)
+        {
+            Finish();
+            return;
+        }
+
+        var step = _steps[_index];
+        string stage = step.Variant < 0 ? "Исходное состояние" : $"Вариант {step.Variant + 1} из {Variants.Length}: {Variants[step.Variant].Title}";
+        _title.Text = stage;
+        _progress.Text = $"Шаг {_index + 1} из {_steps.Count}";
         _received.Text = "";
         _primary.Visible = false;
-        _skip.Visible = false;
 
+        switch (step)
+        {
+            case PressStep press:
+                _captured.Clear();
+                _text.Text = PressPrompt(press.Control);
+                _skip.Text = "Ничего не происходит";
+                _skip.Visible = true;
+                break;
+            case ReplugStep:
+                _sawRemoval = false;
+                _text.Text = "Отключите USB-кабель клавиатуры и подключите его снова.";
+                _skip.Text = "Пропустить";
+                _skip.Visible = true;
+                break;
+            case WriteStep write:
+                _skip.Visible = false;
+                _text.Text = "Записываю тестовые буквы…";
+                RunWrite(write.Variant);
+                break;
+        }
+    }
+
+    static string PressPrompt(ControlId control) => control switch
+    {
+        ControlId.KnobLeft => "Поверните ручку ВЛЕВО на один щелчок.",
+        ControlId.KnobPress => "НАЖМИТЕ на ручку.",
+        ControlId.KnobRight => "Поверните ручку ВПРАВО на один щелчок.",
+        _ => $"Нажмите клавишу {UiText.KeyNumber(control)}.",
+    };
+
+    async void RunWrite(int variantIndex)
+    {
+        var variant = Variants[variantIndex];
         var device = MacroPadDevice.FindConfigInterface();
         if (device == null)
         {
-            _text.Text = "Клавиатура не найдена. Подключите её USB-кабелем — запись начнётся сама.";
-            _stage = Stage.Intro;
-            _primary.Text = "Повторить";
-            _primary.Visible = true;
+            Log($"Вариант {variantIndex + 1}: клавиатура не подключена, запись пропущена");
+            Next();
             return;
         }
 
         var packets = ProfileCompiler.Compile(TestSettings(variant));
         bool sendInit = ProfileCompiler.SendsInitPacket(variant.Mode);
+        _busy = true;
         try
         {
             await Task.Run(() =>
@@ -178,78 +262,69 @@ internal sealed class ProtocolWizardForm : Form
                 using var pad = MacroPadDevice.Open(device);
                 pad.Write(packets, sendInit);
             });
-            Log($"Записан вариант {index + 1} ({variant.Mode}): клавиши 1–6 → {variant.KeyLetters}, ручка ↺●↻ → {variant.KnobLetters}, кадров {packets.Count}");
+            Log($"Записан вариант {variantIndex + 1} ({variant.Mode}): клавиши 1–6 → {variant.KeyLetters}, ручка ↺●↻ → {variant.KnobLetters}, кадров {packets.Count}");
         }
         catch (Exception ex)
         {
-            Log($"Ошибка записи варианта {index + 1}: {ex.Message}");
-            _text.Text = "Не удалось записать: " + ex.Message;
-            _skip.Text = "Следующий вариант";
-            _skip.Visible = true;
-            return;
+            Log($"Ошибка записи варианта {variantIndex + 1}: {ex.Message}");
         }
-
-        _stage = Stage.WaitKey;
-        _text.Text = "Записано.\n\n  1. Отключите USB-кабель клавиатуры и подключите снова.\n  2. Нажмите клавишу 1.\n\n" +
-                     "Если клавиша 1 ничего не печатает (и после переподключения тоже) — нажмите «Ничего не происходит».";
-        _skip.Text = "Ничего не происходит";
-        _skip.Visible = true;
+        finally
+        {
+            _busy = false;
+        }
+        Next();
     }
 
-    void StartKnobTest(int index)
+    void FinishPress()
     {
-        _variant = index;
-        _stage = Stage.Knob;
-        _knobSeen.Clear();
-        Result = Variants[index].Mode;
-        _title.Text = "Нашёлся рабочий способ!";
-        _text.Text = $"Клавиатура понимает вариант «{Variants[index].Title}».\n\n" +
-                     "Теперь проверим ручку: поверните её влево, затем вправо и нажмите на неё. " +
-                     "Потом нажмите «Готово» — даже если ручка ничего не делает: это тоже важный результат, он сохранится в журнале.";
-        _received.Text = "";
-        _primary.Text = "Готово";
-        _primary.Visible = true;
-        _skip.Visible = false;
-        Log($"Рабочий вариант: {Variants[index].Mode}");
+        _quiet.Stop();
+        if (_index < 0 || _index >= _steps.Count || _steps[_index] is not PressStep press) return;
+        string label = press.Variant < 0 ? "исходно" : $"вариант {press.Variant + 1}";
+        Log($"[{label}] {UiText.Title(press.Control)} → {(_captured.Count == 0 ? "нет событий" : string.Join("  ", _captured))}");
+        Next();
     }
 
     void Finish()
     {
-        string knob = _knobSeen.Count == 0 ? "ручка не ответила" : "ручка: " + string.Join(", ", _knobSeen.Select(UiText.Title));
-        Log($"Итог: вариант {Result}, {knob}");
-        _stage = Stage.Done;
-        DialogResult = DialogResult.OK;
-        Close();
-    }
-
-    void ShowFailed()
-    {
-        _stage = Stage.Failed;
-        Result = null;
-        _title.Text = "Подходящий вариант не найден";
-        _text.Text = "Ни один из вариантов не заставил клавиатуру печатать. Пришлите файл user_data\\monitor.log — " +
-                     "в нём всё, что удалось увидеть, этого хватит, чтобы разобраться дальше.";
-        _primary.Text = "Закрыть";
+        _quiet.Stop();
+        _index = _steps.Count;
+        _title.Text = Result != null ? "Нашёлся рабочий способ!" : "Подходящий вариант не найден";
+        _progress.Text = "";
+        string hits = string.Join(", ", Variants.Select((v, i) => $"{v.Mode}: {_keyHits[i]}"));
+        string knob = _knobHits.Count == 0 ? "ручка буквы не прислала" : "ручка: " + string.Join(", ", _knobHits.Select(UiText.Title));
+        Log($"Итог: {(Result?.ToString() ?? "не найден")}; тестовых букв от клавиш — {hits}; {knob}");
+        _text.Text = Result != null
+            ? $"Клавиатура понимает вариант «{Variants[Array.FindIndex(Variants, v => v.Mode == Result)].Title}». " +
+              "Нажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки."
+            : "Ни один вариант не заставил клавиши печатать буквы. Всё, что прислала клавиатура, сохранено " +
+              "в user_data\\monitor.log — этого хватит, чтобы разобраться дальше.";
+        _received.Text = "";
+        _primary.Text = Result != null ? "Готово" : "Закрыть";
         _primary.Visible = true;
         _skip.Visible = false;
-        Log("Итог: ни один вариант не сработал");
     }
 
     void OnPrimary()
     {
-        switch (_stage)
+        if (!_started)
         {
-            case Stage.Intro: StartVariant(0); break;
-            case Stage.Knob: Finish(); break;
-            default: Close(); break;
+            _started = true;
+            Next();
+            return;
+        }
+        if (_index >= _steps.Count)
+        {
+            DialogResult = Result != null ? DialogResult.OK : DialogResult.Cancel;
+            Close();
         }
     }
 
     void OnSkip()
     {
-        Log($"Вариант {_variant + 1}: клавиша 1 не ответила");
-        if (_variant + 1 < Variants.Length) StartVariant(_variant + 1);
-        else ShowFailed();
+        if (_busy || _index < 0 || _index >= _steps.Count) return;
+        if (_steps[_index] is ReplugStep) Log("Переподключение пропущено");
+        if (_steps[_index] is PressStep) FinishPress();
+        else Next();
     }
 
     /// <summary>Тестовая раскладка: каждой кнопке — своя буква этого варианта.</summary>
@@ -280,7 +355,9 @@ internal sealed class ProtocolWizardForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         RawInput.Unregister();
-        Log("──── Мастер закрыт");
+        _quiet.Dispose();
+        _replugSettle.Dispose();
+        Log("──── Диагностика закрыта");
         _file?.Dispose();
         base.OnFormClosed(e);
     }
@@ -303,50 +380,66 @@ internal sealed class ProtocolWizardForm : Form
         }
         else if (m.Msg == Win32.WM_DEVICECHANGE)
         {
-            BeginInvoke(UpdateDeviceStatus);
+            BeginInvoke(OnDeviceChange);
         }
         base.WndProc(ref m);
     }
 
     void OnPadInput(RawEvent input)
     {
-        switch (input)
+        string? text = input switch
         {
-            case RawKeyboardEvent key:
-                Log($"★ клавиатура {(key.Up ? "↑" : "↓")} {key.Key} (скан-код {key.MakeCode:X2})");
-                if (!key.Up) OnPadKey(key.Key);
-                break;
-            case RawHidEvent hid:
-                Log($"★ мультимедиа [{Convert.ToHexString(hid.Report)}]");
-                _received.Text = "Клавиатура прислала мультимедиа-событие (не тестовую букву)";
-                break;
-            case RawMouseEvent mouse when mouse.ButtonFlags != 0:
-                Log($"★ мышь, флаги кнопок 0x{mouse.ButtonFlags:X4}");
-                break;
+            RawKeyboardEvent key => $"{(key.Up ? "↑" : "↓")}{key.Key}",
+            RawHidEvent hid => hid.Report.Any(b => b != 0) ? $"мм[{Convert.ToHexString(hid.Report)}]" : "мм0",
+            RawMouseEvent mouse when mouse.ButtonFlags != 0 => $"мышь{mouse.ButtonFlags:X4}{(mouse.WheelDelta != 0 ? $"({mouse.WheelDelta})" : "")}",
+            _ => null,
+        };
+        if (text == null) return;
+
+        if (_index >= 0 && _index < _steps.Count && _steps[_index] is PressStep press)
+        {
+            _captured.Add(text);
+            _received.Text = "Получено: " + string.Join("  ", _captured);
+            _quiet.Stop();
+            _quiet.Start();
+            if (input is RawKeyboardEvent { Up: false } down) CountLetter(press, down.Key);
+        }
+        else
+        {
+            Log("вне шага: " + text);
         }
     }
 
-    void OnPadKey(Keys key)
+    void CountLetter(PressStep press, Keys key)
     {
-        byte code = KeyCatalog.FromVirtualKey(key);
-        char? letter = Letter(code);
-        int variant = letter == null ? -1 : Array.FindIndex(Variants, v => v.KeyLetters.Contains(letter.Value) || v.KnobLetters.Contains(letter.Value));
-
-        if (variant < 0)
+        if (press.Variant < 0) return;
+        char? letter = Letter(KeyCatalog.FromVirtualKey(key));
+        if (letter == null) return;
+        var variant = Variants[press.Variant];
+        if (variant.KeyLetters.Contains(letter.Value))
         {
-            _received.Text = $"Клавиатура прислала: {key} — это не тестовая буква. Нажмите клавишу 1 ещё раз.";
-            return;
+            _keyHits[press.Variant]++;
+            Result ??= variant.Mode;
         }
+        if (variant.KnobLetters.Contains(letter.Value)) _knobHits.Add(KnobIds[variant.KnobLetters.IndexOf(letter.Value)]);
+    }
 
-        var v = Variants[variant];
-        int keyIndex = v.KeyLetters.IndexOf(letter!.Value);
-        int knobIndex = v.KnobLetters.IndexOf(letter.Value);
-        string where = keyIndex >= 0 ? $"клавиша {keyIndex + 1}" : UiText.Title(KnobIds[knobIndex]);
-        _received.Text = $"Получено: «{letter}» — {where}, вариант {variant + 1}";
-        Log($"Буква «{letter}» = {where}, вариант {variant + 1} ({v.Mode})");
-
-        if (_stage == Stage.WaitKey) StartKnobTest(variant);
-        else if (_stage == Stage.Knob && knobIndex >= 0) _knobSeen.Add(KnobIds[knobIndex]);
+    void OnDeviceChange()
+    {
+        UpdateDeviceStatus();
+        bool connected = MacroPadDevice.FindConfigInterface() != null;
+        if (_index < 0 || _index >= _steps.Count || _steps[_index] is not ReplugStep) return;
+        if (!connected && !_sawRemoval)
+        {
+            _sawRemoval = true;
+            Log("Плата отключена");
+            _text.Text = "Теперь подключите кабель обратно.";
+        }
+        else if (connected && _sawRemoval && !_replugSettle.Enabled)
+        {
+            // Даём Windows закончить установку интерфейсов, прежде чем писать.
+            _replugSettle.Start();
+        }
     }
 
     void UpdateDeviceStatus()

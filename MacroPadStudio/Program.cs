@@ -15,6 +15,7 @@ internal static class Program
     ///   --probe файл         поиск устройства и тестовое открытие, отчёт в файл
     ///   --snapshot файл.png  снимок окна (для проверки интерфейса), с --select Key1|KnobLeft|… и --kind Keys|Media|Mouse|System
     ///   --monitortest файл   открыть монитор, программно нажать F24 и сохранить журнал (проверка монитора)
+    ///   --wizard-snapshot файл.png  снимок окна мастера подбора
     ///   --export-icon файл   сохранить иконку приложения в .ico
     /// </summary>
     [STAThread]
@@ -35,6 +36,21 @@ internal static class Program
         if (Arg("--monitortest") is string monitorReport)
         {
             Application.Run(new MonitorForm(monitorReport));
+            return 0;
+        }
+
+        if (Arg("--wizard-snapshot") is string wizardShot)
+        {
+            var wizard = new ProtocolWizardForm();
+            wizard.Shown += async (_, _) =>
+            {
+                await Task.Delay(400);
+                using var bitmap = new Bitmap(wizard.Width, wizard.Height);
+                wizard.DrawToBitmap(bitmap, new Rectangle(Point.Empty, wizard.Size));
+                bitmap.Save(wizardShot, System.Drawing.Imaging.ImageFormat.Png);
+                wizard.Close();
+            };
+            Application.Run(wizard);
             return 0;
         }
 

@@ -43,7 +43,28 @@ internal static class RawInput
     [DllImport("user32.dll", SetLastError = true)]
     static extern uint GetRawInputData(IntPtr rawInput, uint command, byte[]? data, ref uint size, uint headerSize);
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUTDEVICELIST
+    {
+        public IntPtr Device;
+        public uint Type;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
+    static extern uint GetRawInputDeviceList([Out] RAWINPUTDEVICELIST[]? list, ref uint count, uint size);
+
+    /// <summary>Имена всех устройств, которые видит Raw Input.</summary>
+    public static List<string> DeviceNames()
+    {
+        uint count = 0, size = (uint)Marshal.SizeOf<RAWINPUTDEVICELIST>();
+        GetRawInputDeviceList(null, ref count, size);
+        var list = new RAWINPUTDEVICELIST[count];
+        if (count == 0 || GetRawInputDeviceList(list, ref count, size) == uint.MaxValue) return new List<string>();
+        return list.Take((int)count).Select(d => DeviceName(d.Device)).ToList();
+    }
+
+    // Unicode обязательно: без него .NET вызывает ANSI-версию, и имя устройства читается «кашей».
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
 
     [DllImport("hid.dll")]

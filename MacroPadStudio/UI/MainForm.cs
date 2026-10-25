@@ -125,8 +125,8 @@ internal sealed class MainForm : Form
         device.DropDownItems.Add(new ToolStripMenuItem("Подобрать способ записи…", null, (_, _) => ShowWizard()));
         var protocol = new ToolStripMenuItem("Способ записи");
         AddProtocolItem(protocol, ProtocolMode.Auto, "Определять автоматически");
-        AddProtocolItem(protocol, ProtocolMode.Direct, "Прямой — новая ревизия CH552 (6 клавиш + ручка)");
         AddProtocolItem(protocol, ProtocolMode.Vendor, "Как у официальной программы (без префикса 03)");
+        AddProtocolItem(protocol, ProtocolMode.Direct, "Прямой (формат padclaude)");
         AddProtocolItem(protocol, ProtocolMode.Legacy, "Совместимый с ch57x-keyboard-tool");
         device.DropDownItems.Add(protocol);
 

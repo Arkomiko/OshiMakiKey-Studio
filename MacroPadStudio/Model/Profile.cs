@@ -200,7 +200,7 @@ public sealed class AppSettings
     public ProtocolMode? DetectedProtocol { get; set; }
 
     public ProtocolMode EffectiveProtocol =>
-        Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Direct;
+        Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Vendor;
 
     /// <summary>Слои есть только в формате ch57x — для остальных записывается только первый.</summary>
     public int EffectiveLayerCount => EffectiveProtocol == ProtocolMode.Legacy ? LayerCount : 1;
@@ -224,16 +224,16 @@ public enum ProtocolMode
 {
     Auto,
 
-    /// <summary>
-    /// Ревизия CH552 с битовым мультимедиа-интерфейсом: прошивка хранит готовый HID-отчёт клавиатуры
-    /// для каждой кнопки (формат padclaude).
-    /// </summary>
+    /// <summary>Формат padclaude: прошивка хранит готовый HID-отчёт клавиатуры для каждой кнопки.</summary>
     Direct,
 
     /// <summary>Формат ch57x-keyboard-tool (k8890): клавиши, мультимедиа и мышь разбирает сама прошивка.</summary>
     Legacy,
 
-    /// <summary>Формат официальной программы для плат без Report ID («версия 0»): без префикса 0x03 и без слоёв.</summary>
+    /// <summary>
+    /// Формат официальной программы для плат без Report ID («версия 0»): без префикса 0x03 и без слоёв.
+    /// Так официальная программа пишет платы, у которых, как у CH552 6 клавиш + ручка, нет Report ID.
+    /// </summary>
     Vendor,
 }
 

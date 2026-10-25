@@ -19,7 +19,7 @@ internal sealed class MonitorForm : Form
     readonly ListBox _log = new();
     readonly Label _hint = new();
     readonly CheckBox _showOthers = new();
-    readonly string _logPath = Path.Combine(SettingsStore.Folder, "monitor.log");
+    readonly string _logPath = LogFiles.MonitorLog;
     readonly string? _selfTestReport;
     readonly List<HidInputReader> _readers = new();
     readonly System.Windows.Forms.Timer _deviceTimer = new() { Interval = 800 };
@@ -91,16 +91,9 @@ internal sealed class MonitorForm : Form
             StartReaders();
         };
 
-        try
-        {
-            Directory.CreateDirectory(SettingsStore.Folder);
-            _file = new StreamWriter(_logPath, append: true, Encoding.UTF8) { AutoFlush = true };
-        }
-        catch (IOException)
-        {
-            _file = null;
-        }
+        _file = LogFiles.OpenAppend(_logPath, out string? logError);
         Append($"──── Монитор открыт {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
+        if (logError != null) Append("Не удалось открыть monitor.log: " + logError);
     }
 
     static Button MakeButton(string text, EventHandler onClick)

@@ -129,18 +129,11 @@ internal sealed class ProtocolWizardForm : Form
             Next();
         };
 
-        try
-        {
-            Directory.CreateDirectory(SettingsStore.Folder);
-            _file = new StreamWriter(Path.Combine(SettingsStore.Folder, "monitor.log"), append: true, Encoding.UTF8) { AutoFlush = true };
-        }
-        catch (IOException)
-        {
-            _file = null;
-        }
+        _file = LogFiles.OpenAppend(LogFiles.MonitorLog, out string? logError);
 
         BuildSteps();
         Log($"──── Диагностика открыта {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
+        if (logError != null) Log("Не удалось открыть monitor.log: " + logError + " — протокол сохранится отдельным файлом");
         ShowIntro();
         UpdateDeviceStatus();
     }
@@ -293,11 +286,11 @@ internal sealed class ProtocolWizardForm : Form
         string hits = string.Join(", ", Variants.Select((v, i) => $"{v.Mode}: {_keyHits[i]}"));
         string knob = _knobHits.Count == 0 ? "ручка буквы не прислала" : "ручка: " + string.Join(", ", _knobHits.Select(UiText.Title));
         Log($"Итог: {(Result?.ToString() ?? "не найден")}; тестовых букв от клавиш — {hits}; {knob}");
+        string saved = SaveProtocol() is string path ? $"Протокол сохранён: user_data\\{Path.GetFileName(path)}." : "";
         _text.Text = Result != null
             ? $"Клавиатура понимает вариант «{Variants[Array.FindIndex(Variants, v => v.Mode == Result)].Title}». " +
-              "Нажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки."
-            : "Ни один вариант не заставил клавиши печатать буквы. Всё, что прислала клавиатура, сохранено " +
-              "в user_data\\monitor.log — этого хватит, чтобы разобраться дальше.";
+              $"Нажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки.\n\n{saved}"
+            : $"Ни один вариант не заставил клавиши печатать буквы. Всё, что прислала клавиатура, записано — этого хватит, чтобы разобраться дальше.\n\n{saved}";
         _received.Text = "";
         _primary.Text = Result != null ? "Готово" : "Закрыть";
         _primary.Visible = true;
@@ -358,8 +351,19 @@ internal sealed class ProtocolWizardForm : Form
         _quiet.Dispose();
         _replugSettle.Dispose();
         Log("──── Диагностика закрыта");
+        // Мастер закрыли раньше итога — протокол всё равно сохраняем.
+        if (_savedPath == null && _started) SaveProtocol();
         _file?.Dispose();
         base.OnFormClosed(e);
+    }
+
+    string? _savedPath;
+
+    /// <summary>Отдельный файл с полным протоколом — на случай, если monitor.log был недоступен.</summary>
+    string? SaveProtocol()
+    {
+        _savedPath = LogFiles.SaveSnapshot("diagnostics", _log.Items.Cast<string>()) ?? _savedPath;
+        return _savedPath;
     }
 
     // Тестовые буквы не должны срабатывать как команды этого окна.

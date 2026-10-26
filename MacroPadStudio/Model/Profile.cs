@@ -378,6 +378,22 @@ public static class Execution
     /// <summary>Прошивка хранит несколько слоёв (переключаются на самой плате).</summary>
     public static bool SupportsLayers(ProtocolMode protocol) =>
         protocol is ProtocolMode.Legacy or ProtocolMode.K884x or ProtocolMode.K8850;
+
+    /// <summary>
+    /// Повторять ли действие, пока кнопка зажата, — как на обычной клавиатуре: громкость, яркость и колесо мыши
+    /// повторяются, переключатели (звук вкл/выкл, пауза, треки, запуск, сочетания) — один раз. Повороты ручки —
+    /// это отдельные щелчки, их не фильтруем никогда.
+    /// </summary>
+    public static bool RepeatsWhileHeld(PadAction action, ControlId control)
+    {
+        if (!Controls.IsKey(control) && Controls.KnobAction(control) != 1) return true;
+        return action.Kind switch
+        {
+            ActionKind.Media => action.MediaCode is MediaCatalog.VolumeUp or MediaCatalog.VolumeDown or 0x6F or 0x70,
+            ActionKind.Mouse => action.Mouse is MouseActionKind.WheelUp or MouseActionKind.WheelDown,
+            _ => false,
+        };
+    }
     public static bool NeedsAgent(PadAction action, ProtocolMode protocol) => action.Kind switch
     {
         ActionKind.None => false,

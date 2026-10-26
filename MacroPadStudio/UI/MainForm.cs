@@ -56,6 +56,7 @@ internal sealed class MainForm : Form
     readonly ToolTip _tips = new();
     readonly NotifyIcon _tray = new();
     readonly HotkeyAgent? _agent;
+    readonly HoldFilter _holdFilter = new();
     readonly System.Windows.Forms.Timer _deviceTimer = new() { Interval = 400 };
     readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 700 };
     readonly ToolStripMenuItem _layersMenu = new(L.T("menu.layers", "Количество слоёв"));
@@ -833,6 +834,11 @@ internal sealed class MainForm : Form
     {
         var (control, action) = AgentActions().FirstOrDefault(x => x.Action.TriggerSlot == slot);
         if (action == null) return;
+        if (!_holdFilter.ShouldRun(slot, control, action))
+        {
+            _monitor?.LogAgent($"{TriggerKeys.Describe(slot)} → {UiText.Title(control)}: {L.T("monitor.heldSkip", "удержание — повтор пропущен")}");
+            return;
+        }
         _monitor?.LogAgent($"{TriggerKeys.Describe(slot)} → {UiText.Title(control)}: {BindingText.Summary(action)}");
         _ = RunActionAsync(action, fromTest: false);
     }

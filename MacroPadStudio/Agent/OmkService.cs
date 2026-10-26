@@ -125,7 +125,8 @@ internal static class OmkService
         readonly EventWaitHandle _stop = new(false, EventResetMode.AutoReset, StopEventName);
         readonly System.Windows.Forms.Timer _timer = new() { Interval = 1500 };
         readonly RegisteredWaitHandle _pauseWait, _stopWait;
-        List<(int Slot, PadAction Action)> _actions = new();
+        readonly HoldFilter _holdFilter = new();
+        List<(int Slot, ControlId Control, PadAction Action)> _actions = new();
         bool _paused = true;
 
         public ServiceContext()
@@ -179,7 +180,7 @@ internal static class OmkService
                 SettingsStore.AttachPresets(settings);
                 _actions = settings.Profile.All(settings.EffectiveLayerCount, settings.Controls)
                     .Where(x => x.Action.TriggerSlot != null)
-                    .Select(x => (x.Action.TriggerSlot!.Value, x.Action))
+                    .Select(x => (x.Action.TriggerSlot!.Value, x.Control, x.Action))
                     .ToList();
                 _agent.Apply(_actions.Select(a => a.Slot));
             }
@@ -192,8 +193,8 @@ internal static class OmkService
 
         async void OnTrigger(int slot)
         {
-            var action = _actions.FirstOrDefault(a => a.Slot == slot).Action;
-            if (action == null) return;
+            var (_, control, action) = _actions.FirstOrDefault(a => a.Slot == slot);
+            if (action == null || !_holdFilter.ShouldRun(slot, control, action)) return;
             try
             {
                 await ActionRunner.ExecuteAsync(action, _owner);

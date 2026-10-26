@@ -159,6 +159,23 @@ internal static class SelfTest
         noRepeat.Normalize();
         Check("Без автоповтора: сочетание выполняет программа", noRepeat.NeedsAgent(PadAction.FromKeys(KeyChord.Of(KeyCatalog.C, ctrl: true))));
 
+        // Удержание: прошивка шлёт тап сразу, первый повтор через ~300 мс, дальше каждые ~110 мс (из monitor.log).
+        long fakeNow = 0;
+        var hold = new Agent.HoldFilter(() => fakeNow);
+        var mute = PadAction.FromMedia(MediaCatalog.Mute);
+        var volume = PadAction.FromMedia(MediaCatalog.VolumeUp);
+        int RunsFor(PadAction action, ControlId control, int slot, params long[] taps)
+        {
+            int runs = 0;
+            foreach (long t in taps) { fakeNow = t; if (hold.ShouldRun(slot, control, action)) runs++; }
+            return runs;
+        }
+        long[] held = { 0, 303, 415, 527, 639, 751 };
+        Check("Удержание: звук вкл/выкл срабатывает один раз", RunsFor(mute, ControlId.Key5, 3, held) == 1);
+        Check("Удержание: громкость повторяется", RunsFor(volume, ControlId.Key6, 4, held.Select(t => t + 10_000).ToArray()) == held.Length);
+        Check("Удержание: повороты ручки не фильтруются", RunsFor(mute, ControlId.KnobLeft, 5, held.Select(t => t + 20_000).ToArray()) == held.Length);
+        Check("Два отдельных нажатия — два срабатывания", RunsFor(mute, ControlId.Key5, 3, 30_000, 30_900) == 2);
+
         // Сохранение и загрузка.
         var settings = new AppSettings { Protocol = ProtocolMode.Legacy };
         settings.Normalize();

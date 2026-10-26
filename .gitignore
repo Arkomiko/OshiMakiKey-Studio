@@ -8,6 +8,10 @@ obj/
 publish/
 *.pdb
 
-# IDE
-.vs/
+# IDE: из .vs в репозиторий идёт только файл решения, кэш Visual Studio — нет
+.vs/*
+!.vs/OshiMakiKey-Studio.sln
 *.user
+
+# Рабочая папка ассистента — только локально, никогда не отправляется на GitHub
+.claude/

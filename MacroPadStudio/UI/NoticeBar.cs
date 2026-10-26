@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
@@ -84,18 +83,17 @@ internal sealed class NoticeBar : Panel
 
         if (notice.SuggestUpdate)
         {
-            var update = new LinkLabel
+            // Проверка обновлений и целостности файлов ещё не готова — кнопка видна, но неактивна.
+            var update = new Label
             {
-                Text = L.T("notice.checkUpdates", "Проверить обновления"),
+                Text = L.T("menu.updates", "Проверить обновления и файлы"),
                 AutoSize = true,
                 Font = Theme.Strong,
-                LinkColor = fore,
-                ActiveLinkColor = fore,
-                VisitedLinkColor = fore,
+                ForeColor = Theme.Blend(back, fore, 0.5f),
                 Anchor = AnchorStyles.Right,
                 Margin = new Padding(0, 0, Theme.S(10), 0),
             };
-            update.LinkClicked += (_, _) => OpenReleases();
+            _tips.SetToolTip(update, L.T("menu.updates.soon", "Скоро"));
             row.Controls.Add(update, 2, 0);
         }
 
@@ -116,18 +114,6 @@ internal sealed class NoticeBar : Panel
         _tips.SetToolTip(close, L.T("notice.dismiss", "Скрыть уведомление"));
         row.Controls.Add(close, 3, 0);
         return row;
-    }
-
-    public static void OpenReleases()
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(Branding.ReleasesUrl) { UseShellExecute = true })?.Dispose();
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            MessageBox.Show(ex.Message, Branding.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
     }
 
     protected override void OnResize(EventArgs e)

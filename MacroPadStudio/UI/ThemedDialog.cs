@@ -8,7 +8,7 @@ internal sealed class ThemedDialog : Form
     readonly CheckBox? _check;
     int _result;
 
-    ThemedDialog(string title, string heading, string text, IReadOnlyList<string> buttons, DialogKind kind, string? checkText, int cancelIndex)
+    ThemedDialog(IWin32Window? owner, string title, string heading, string text, IReadOnlyList<string> buttons, DialogKind kind, string? checkText, int cancelIndex)
     {
         _result = cancelIndex;
         Text = title;
@@ -16,12 +16,6 @@ internal sealed class ThemedDialog : Form
         Font = Theme.Body;
         BackColor = Theme.Surface;
         AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = MinimizeBox = false;
-        ShowInTaskbar = false;
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
         var (back, fore, glyph) = kind switch
         {
@@ -104,7 +98,7 @@ internal sealed class ThemedDialog : Form
         }
         root.Controls.Add(row, 0, 3);
         root.SetColumnSpan(row, 2);
-        Controls.Add(root);
+        Overlay.Prepare(this, Overlay.Card(root), owner);
         Theme.ApplyTo(this);
     }
 
@@ -115,7 +109,7 @@ internal sealed class ThemedDialog : Form
     public static (int Button, bool Checked) Show(IWin32Window? owner, string title, string heading, string text,
         IReadOnlyList<string> buttons, DialogKind kind = DialogKind.Info, string? checkText = null, int cancelIndex = -1)
     {
-        using var dialog = new ThemedDialog(title, heading, text, buttons, kind, checkText, cancelIndex);
+        using var dialog = new ThemedDialog(owner, title, heading, text, buttons, kind, checkText, cancelIndex);
         dialog.ShowDialog(owner);
         return (dialog._result, dialog._check?.Checked == true);
     }

@@ -4,23 +4,22 @@ using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
 
-/// <summary>«О программе» в цветах темы: шапка с акцентом, сведения о драйвере, теме и языке, ссылки.</summary>
-internal sealed class AboutForm : Form
+/// <summary>Страница «О программе» внутри главного окна: карточка по центру с шапкой цвета акцента, сведениями и ссылками.</summary>
+internal sealed class AboutPage : UserControl
 {
     readonly List<Image> _images = new();
 
-    public AboutForm(AppSettings settings)
+    readonly Panel _card = new();
+
+    public event EventHandler? Closed;
+
+    public AboutPage(AppSettings settings)
     {
-        Text = L.T("menu.about", "О программе");
-        Icon = Theme.AppIcon;
         Font = Theme.Body;
-        BackColor = Theme.Surface;
-        AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = MinimizeBox = false;
-        ShowInTaskbar = false;
-        ClientSize = new Size(Theme.S(520), Theme.S(560));
+        BackColor = Theme.Window;
+        Dock = DockStyle.Fill;
+        _card.Size = new Size(Theme.S(560), Theme.S(600));
+        _card.BackColor = Theme.Surface;
 
         var header = new Banner { Dock = DockStyle.Top, Height = Theme.S(150) };
 
@@ -93,18 +92,35 @@ internal sealed class AboutForm : Form
             BackColor = Theme.Window,
         };
         var close = ThemedDialog.MakeButton(L.T("button.close", "Закрыть"), primary: true);
-        close.DialogResult = DialogResult.OK;
+        close.Click += (_, _) => Closed?.Invoke(this, EventArgs.Empty);
         bottom.Controls.Add(close);
         var site = ThemedDialog.MakeButton(L.T("about.github", "Страница на GitHub"), primary: false);
         site.Click += (_, _) => Open(Branding.Website, null);
         bottom.Controls.Add(site);
-        AcceptButton = close;
-        CancelButton = close;
 
-        Controls.Add(body);
-        Controls.Add(bottom);
-        Controls.Add(header);
-        Theme.ApplyTo(this);
+        _card.Controls.Add(body);
+        _card.Controls.Add(bottom);
+        _card.Controls.Add(header);
+        Controls.Add(_card);
+        ForeColor = Theme.Text;
+        Theme.Style(this);
+    }
+
+    // Карточка всегда по центру страницы.
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        _card.Location = new Point(Math.Max(0, (ClientSize.Width - _card.Width) / 2), Math.Max(0, (ClientSize.Height - _card.Height) / 2));
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData is Keys.Escape or Keys.Enter)
+        {
+            Closed?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     static Label Value(string text) => new() { Text = text, AutoSize = true, Font = Theme.Strong, ForeColor = Theme.Text, Margin = new Padding(0, Theme.S(6), 0, Theme.S(6)) };

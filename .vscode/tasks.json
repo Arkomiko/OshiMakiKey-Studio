@@ -6,8 +6,34 @@
       "detail": "Сборка Debug (dotnet build)",
       "type": "process",
       "command": "dotnet",
-      "args": ["build", "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj", "-c", "Debug", "/property:GenerateFullPaths=true", "/consoleloggerparameters:NoSummary"],
-      "group": { "kind": "build", "isDefault": true },
+      "args": [
+        "build",
+        "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj",
+        "-c",
+        "Debug",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build (Visual Studio solution)",
+      "detail": "Сборка через .vs/OshiMakiKey-Studio.sln — то же, что F6 в Visual Studio",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/.vs/OshiMakiKey-Studio.sln",
+        "-c",
+        "Debug",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": "build",
       "problemMatcher": "$msCompile"
     },
     {
@@ -15,8 +41,21 @@
       "detail": "Portable exe в publish/, затем скопировать в корень вручную",
       "type": "process",
       "command": "dotnet",
-      "args": ["publish", "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
-               "-p:PublishSingleFile=true", "-p:DebugType=None", "-p:DebugSymbols=false", "-o", "${workspaceFolder}/publish"],
+      "args": [
+        "publish",
+        "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj",
+        "-c",
+        "Release",
+        "-r",
+        "win-x64",
+        "--self-contained",
+        "false",
+        "-p:PublishSingleFile=true",
+        "-p:DebugType=None",
+        "-p:DebugSymbols=false",
+        "-o",
+        "${workspaceFolder}/publish"
+      ],
       "problemMatcher": "$msCompile"
     },
     {
@@ -24,7 +63,10 @@
       "detail": "Самопроверка без интерфейса, отчёт в selftest.txt",
       "type": "process",
       "command": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
-      "args": ["--selftest", "${workspaceFolder}/MacroPadStudio/bin/Debug/selftest.txt"],
+      "args": [
+        "--selftest",
+        "${workspaceFolder}/MacroPadStudio/bin/Debug/selftest.txt"
+      ],
       "dependsOn": "build",
       "problemMatcher": []
     },
@@ -33,7 +75,49 @@
       "detail": "Собрать language/ru.json из кода и проверить переводы",
       "type": "process",
       "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/lang-keys.ps1"],
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/tools/lang-keys.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "drop-test",
+      "detail": "Проверка перетаскивания действий на клавиши и ручку, отчёт в drop-test.txt",
+      "type": "process",
+      "command": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": [
+        "--drop-test",
+        "${workspaceFolder}/MacroPadStudio/bin/Debug/drop-test.txt"
+      ],
+      "dependsOn": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "snapshot",
+      "detail": "Снимок главного окна в snapshot.png (без нажатий на рабочем столе)",
+      "type": "process",
+      "command": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": [
+        "--snapshot",
+        "${workspaceFolder}/MacroPadStudio/bin/Debug/snapshot.png"
+      ],
+      "dependsOn": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "monitor-snapshot",
+      "detail": "Снимок монитора нажатий с примерными строками",
+      "type": "process",
+      "command": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": [
+        "--monitor-snapshot",
+        "${workspaceFolder}/MacroPadStudio/bin/Debug/monitor.png"
+      ],
+      "dependsOn": "build",
       "problemMatcher": []
     }
   ]

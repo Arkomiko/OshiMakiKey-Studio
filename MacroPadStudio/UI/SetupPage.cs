@@ -4,27 +4,39 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.UI;
 
 /// <summary>
-/// Мастер первого запуска: язык → тема → плата. Язык и тема применяются сразу, и мастер перерисовывается
-/// в них же. После него открывается программа и показывается тур по окну.
+/// Мастер первого запуска — страница главного окна: язык → тема → плата. Язык и тема применяются сразу,
+/// мастер перерисовывается в них же (<see cref="AppearanceChanged"/> — чтобы окно перекрасило заголовок).
+/// По «Готово» — <see cref="Finished"/>; дальше окно показывает программу и тур по ней.
 /// </summary>
-internal sealed class SetupWizardForm : Form
+internal sealed class SetupPage : UserControl
 {
     readonly AppSettings _settings;
     readonly List<Image> _images = new();
     int _page;
 
-    public SetupWizardForm(AppSettings settings, int page = 0)
+    public event EventHandler? Finished;
+    public event EventHandler? AppearanceChanged;
+
+    /// <summary>Пользователь нажал «Проверить запись…» — окно откроет страницу проверки поверх мастера.</summary>
+    public event EventHandler? WriteCheckRequested;
+
+    public SetupPage(AppSettings settings, int page = 0)
     {
         _settings = settings;
         _page = page;
-        Icon = Theme.AppIcon;
         AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
-        ClientSize = new Size(Theme.S(860), Theme.S(600));
+        Dock = DockStyle.Fill;
+    }
+
+    // Строим при первом показе: ширина страницы к этому моменту известна.
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
         Render();
     }
+
+    /// <summary>Вернулись со страницы проверки записи — перерисовать (могли смениться номера ручки).</summary>
+    public void Rebuild() => Rerender();
 
     // Перерисовка из обработчика щелчка: сам щёлкнутый элемент при этом удаляется, поэтому — после выхода из обработчика.
     void Rerender() => BeginInvoke(new Action(Render));
@@ -39,7 +51,6 @@ internal sealed class SetupWizardForm : Form
         foreach (var image in _images) image.Dispose();
         _images.Clear();
 
-        Text = L.T("setup.title", "Первый запуск") + " — " + Branding.AppName;
         Font = Theme.Body;
         BackColor = Theme.Window;
 
@@ -57,7 +68,7 @@ internal sealed class SetupWizardForm : Form
             BackColor = Theme.Window,
         };
         content.Controls.Add(page);
-        int width = ClientSize.Width - Theme.S(100);
+        int width = Math.Max(Theme.S(600), ClientSize.Width - Theme.S(100));
         switch (_page)
         {
             case 0: BuildLanguage(page, width); break;
@@ -83,14 +94,15 @@ internal sealed class SetupWizardForm : Form
             back.Click += (_, _) => { _page--; Rerender(); };
             bottom.Controls.Add(back);
         }
-        AcceptButton = next;
 
         Controls.Add(content);
         Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Border });
         Controls.Add(bottom);
         Controls.Add(header);
-        Theme.ApplyTo(this);
+        ForeColor = Theme.Text;
+        Theme.Style(this);
         ResumeLayout(true);
+        next.Focus();
     }
 
     static Label Title(string text) => new() { Text = text, AutoSize = true, Font = new Font("Segoe UI Semibold", 20f), ForeColor = Theme.Text, Margin = new Padding(0, 0, 0, Theme.S(6)) };
@@ -135,6 +147,7 @@ internal sealed class SetupWizardForm : Form
                 L.Load(language.Code);
                 KeyCatalog.Rebuild();
                 MediaCatalog.Rebuild();
+                AppearanceChanged?.Invoke(this, EventArgs.Empty);
                 Rerender();
             };
             cards.Controls.Add(card);
@@ -164,6 +177,7 @@ internal sealed class SetupWizardForm : Form
             {
                 _settings.Theme = theme.Id;
                 ThemeStore.Apply(theme.Id);
+                AppearanceChanged?.Invoke(this, EventArgs.Empty);
                 Rerender();
             };
             cards.Controls.Add(card);
@@ -233,14 +247,7 @@ internal sealed class SetupWizardForm : Form
             check.Margin = new Padding(0);
             check.Click += (_, _) =>
             {
-                using var wizard = new ProtocolWizardForm(_settings.EffectiveDriver);
-                wizard.ShowDialog(this);
-                if (wizard.Result == ProtocolMode.Direct && wizard.KnobSlots != null)
-                {
-                    _settings.LearnedKnobSlots ??= new();
-                    _settings.LearnedKnobSlots[_settings.EffectiveDriver.Id] = wizard.KnobSlots;
-                }
-                _settings.LastWrittenSignature = null;
+                WriteCheckRequested?.Invoke(this, EventArgs.Empty);
             };
             row.Controls.Add(check);
         }
@@ -255,16 +262,9 @@ internal sealed class SetupWizardForm : Form
             Rerender();
             return;
         }
-        DialogResult = DialogResult.OK;
-        Close();
-    }
-
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        // Закрытый крестиком мастер тоже считается пройденным: выбранное уже применено.
         _settings.SetupDone = true;
         _settings.TourDone = false;
-        base.OnFormClosing(e);
+        Finished?.Invoke(this, EventArgs.Empty);
     }
 
     protected override void Dispose(bool disposing)

@@ -1,0 +1,27 @@
+{
+  "profiles": {
+    "OshiMakiKey Studio": {
+      "commandName": "Project"
+    },
+    "В трее (--tray)": {
+      "commandName": "Project",
+      "commandLineArgs": "--tray"
+    },
+    "Фоновая служба (--service)": {
+      "commandName": "Project",
+      "commandLineArgs": "--service"
+    },
+    "Самопроверка (--selftest)": {
+      "commandName": "Project",
+      "commandLineArgs": "--selftest selftest.txt"
+    },
+    "Проверка перетаскивания (--drop-test)": {
+      "commandName": "Project",
+      "commandLineArgs": "--drop-test drop-test.txt"
+    },
+    "Снимок окна (тёмная тема, English)": {
+      "commandName": "Project",
+      "commandLineArgs": "--snapshot snapshot.png --theme dark-blue --lang en"
+    }
+  }
+}

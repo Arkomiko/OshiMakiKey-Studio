@@ -158,30 +158,4 @@ internal static class ThemeStore
         return bitmap;
     }
 
-    /// <summary>Значок темы для меню: фон окна, карточка и акцентная точка.</summary>
-    public static Bitmap Swatch(ThemeDef theme, int size)
-    {
-        Theme.Apply(theme);
-        Color window = Theme.Window, surface = Theme.Surface, border = Theme.Border, accent = Theme.Accent;
-        Theme.Apply(Current);
-
-        var bitmap = new Bitmap(size, size);
-        using var g = Graphics.FromImage(bitmap);
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        var outer = new RectangleF(0.5f, 0.5f, size - 1.5f, size - 1.5f);
-        using (var path = Theme.Rounded(outer, size / 5f))
-        using (var brush = new SolidBrush(window))
-        using (var pen = new Pen(border))
-        {
-            g.FillPath(brush, path);
-            g.DrawPath(pen, path);
-        }
-        using (var card = Theme.Rounded(new RectangleF(size * 0.18f, size * 0.18f, size * 0.64f, size * 0.64f), size / 8f))
-        using (var brush = new SolidBrush(surface))
-            g.FillPath(brush, card);
-        float dot = size * 0.36f;
-        using (var brush = new SolidBrush(accent))
-            g.FillEllipse(brush, (size - dot) / 2, (size - dot) / 2, dot, dot);
-        return bitmap;
-    }
 }

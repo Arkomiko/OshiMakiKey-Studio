@@ -2,6 +2,7 @@ using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
 
+/// <summary>Подписи кнопок платы для интерфейса: «Клавиша 3», «Ручка 2: поворот влево», подсказки и значки.</summary>
 internal static class UiText
 {
     /// <summary>Плата, которую сейчас настраивают: от её раскладки зависит, нумеровать ли ручки.</summary>

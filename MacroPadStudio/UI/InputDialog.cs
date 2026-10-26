@@ -9,7 +9,7 @@ internal sealed class InputDialog : Form
     readonly Label _error = new();
     readonly Func<string, string?>? _validate;
 
-    InputDialog(string title, string prompt, string initial, Func<string, string?>? validate)
+    InputDialog(IWin32Window? owner, string title, string prompt, string initial, Func<string, string?>? validate)
     {
         _validate = validate;
 
@@ -18,18 +18,12 @@ internal sealed class InputDialog : Form
         Font = Theme.Body;
         BackColor = Theme.Surface;
         AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = MinimizeBox = false;
-        ShowInTaskbar = false;
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
         var root = new TableLayoutPanel
         {
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Padding = new Padding(Theme.S(20), Theme.S(16), Theme.S(20), Theme.S(14)),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.S(380)));
@@ -61,11 +55,13 @@ internal sealed class InputDialog : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(ok);
 
-        root.Controls.Add(label, 0, 0);
-        root.Controls.Add(_box, 0, 1);
-        root.Controls.Add(_error, 0, 2);
-        root.Controls.Add(buttons, 0, 3);
-        Controls.Add(root);
+        // Заголовок окна в режиме «внутри окна» не виден — показываем его в карточке.
+        root.Controls.Add(new Label { Text = title, AutoSize = true, Font = Theme.Subtitle, Margin = new Padding(0, 0, 0, Theme.S(10)) }, 0, 0);
+        root.Controls.Add(label, 0, 1);
+        root.Controls.Add(_box, 0, 2);
+        root.Controls.Add(_error, 0, 3);
+        root.Controls.Add(buttons, 0, 4);
+        Overlay.Prepare(this, Overlay.Card(root), owner);
 
         AcceptButton = ok;
         CancelButton = cancel;
@@ -78,7 +74,7 @@ internal sealed class InputDialog : Form
     /// </summary>
     public static string? Ask(IWin32Window? owner, string title, string prompt, string initial = "", Func<string, string?>? validate = null)
     {
-        using var dialog = new InputDialog(title, prompt, initial, validate);
+        using var dialog = new InputDialog(owner, title, prompt, initial, validate);
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog._box.Text.Trim() : null;
     }
 

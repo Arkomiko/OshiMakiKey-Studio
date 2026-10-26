@@ -3,6 +3,10 @@ using OshiMakiKey.UI;
 
 namespace OshiMakiKey;
 
+/// <summary>
+/// Точка входа. Обычный запуск — одна копия программы с одним окном (повторный запуск лишь показывает его);
+/// --service — фоновая служба без окна; остальные ключи — режимы проверки без участия пользователя.
+/// </summary>
 internal static class Program
 {
     const string MutexName = Branding.InternalName + ".SingleInstance";
@@ -15,8 +19,12 @@ internal static class Program
     ///   --probe файл         поиск устройства и тестовое открытие, отчёт в файл
     ///   --snapshot файл.png  снимок окна (для проверки интерфейса), с --select Key1|KnobLeft|… и --kind Keys|Media|Mouse|System,
     ///                        --theme id и --lang код — только для этого снимка
-    ///   --monitortest файл   открыть монитор, программно нажать F24 и сохранить журнал (проверка монитора)
-    ///   --wizard-snapshot файл.png  снимок окна мастера подбора
+    ///                        --switch-theme id / --switch-lang код — сменить уже открытому окну (проверка без перезапуска),
+    ///                        --page settings|about|setup — снимок с открытой страницей
+    ///   --form-snapshot settings0..6|about|setup-0..2|overwrite файл.png  снимок одной страницы или диалога
+    ///   --drop-test файл     перетаскивание действий на клавиши и ручку, отчёт PASS/FAIL в файл
+    ///   --wizard-snapshot файл.png  снимок страницы проверки записи
+    ///   --monitor-snapshot файл.png снимок монитора с примерными строками
     ///   --export-icon файл   сохранить иконку приложения в .ico
     /// </summary>
     [STAThread]
@@ -45,10 +53,12 @@ internal static class Program
 
         var settings = SettingsStore.LoadSettings();
 
-        if (Arg("--monitortest") is string monitorReport)
+        if (Arg("--monitor-snapshot") is string monitorShot)
         {
             LoadResources(settings);
-            Application.Run(new MonitorForm(monitorReport));
+            var monitor = new MonitorForm();
+            monitor.Shown += (_, _) => monitor.AddSamples();
+            SnapshotForm(monitor, monitorShot);
             return 0;
         }
 
@@ -56,16 +66,7 @@ internal static class Program
         {
             LoadResources(settings);
             SettingsStore.AttachPresets(settings);
-            var wizard = new ProtocolWizardForm(settings.EffectiveDriver);
-            wizard.Shown += async (_, _) =>
-            {
-                await Task.Delay(400);
-                using var bitmap = new Bitmap(wizard.Width, wizard.Height);
-                wizard.DrawToBitmap(bitmap, new Rectangle(Point.Empty, wizard.Size));
-                bitmap.Save(wizardShot, System.Drawing.Imaging.ImageFormat.Png);
-                wizard.Close();
-            };
-            Application.Run(wizard);
+            SnapshotForm(PageHost(new WriteCheckPage(settings.EffectiveDriver)), wizardShot);
             return 0;
         }
 
@@ -79,12 +80,12 @@ internal static class Program
             SettingsStore.AttachPresets(settings);
             Form form = formName switch
             {
-                "about" => new AboutForm(settings),
-                "setup-0" or "setup-1" or "setup-2" => new SetupWizardForm(settings, formName[^1] - '0'),
+                "about" => PageHost(new AboutPage(settings)),
+                "setup-0" or "setup-1" or "setup-2" => PageHost(new SetupPage(settings, formName[^1] - '0')),
                 "overwrite" => new FormShot(() => ThemedDialog.Show(null, Branding.AppName, L.T("drop.overwrite.heading", "Внимание, вы хотите перезаписать комбинацию на клавише!"),
                     L.F("drop.overwrite.text", "Сейчас на «{0}»: {1}\nБудет: {2}", "Клавиша 4", "Ctrl + V", "Предыдущий трек"),
                     new[] { L.T("drop.overwrite", "Перезаписать"), L.T("button.cancel", "Отмена") }, DialogKind.Warning, L.T("drop.dontAsk", "Больше не показывать это сообщение"), 1)),
-                _ when formName.StartsWith("settings") => new SettingsForm(settings, null, formName.Length > 8 ? formName[8] - '0' : 0),
+                _ when formName.StartsWith("settings") => PageHost(new SettingsPage(settings, null, formName.Length > 8 ? formName[8] - '0' : 0)),
                 _ => throw new ArgumentException(formName),
             };
             if (form is FormShot shot)
@@ -93,6 +94,20 @@ internal static class Program
                 Application.Run(shot);
             }
             else SnapshotForm(form, path);
+            return 0;
+        }
+
+        if (Arg("--drop-test") is string dropReport)
+        {
+            LoadResources(settings);
+            SettingsStore.AttachPresets(settings);
+            var form = new MainForm(settings, false, null, dropReport);
+            form.Shown += (_, _) =>
+            {
+                File.WriteAllLines(dropReport, form.RunDropTest());
+                form.Close();
+            };
+            Application.Run(form);
             return 0;
         }
 
@@ -112,6 +127,8 @@ internal static class Program
             }
             var snapshotForm = new MainForm(settings, false, null, snapshotPath, select);
             if (int.TryParse(Arg("--tour"), out int tourStep)) snapshotForm.SnapshotTourStep = tourStep;
+            snapshotForm.SnapshotSwitch = (Arg("--switch-theme"), Arg("--switch-lang"));
+            snapshotForm.SnapshotPage = Arg("--page");
             Application.Run(snapshotForm);
             return 0;
         }
@@ -136,29 +153,10 @@ internal static class Program
         Agent.OmkService.RefreshPathIfInstalled();
         LoadResources(settings);
         SettingsStore.AttachPresets(settings);
+        LogFiles.Cleanup();
 
-        bool startHidden = args.Contains("--tray");
-        if (!settings.SetupDone && !startHidden) RunSetup(settings);
-
-        ReopenState? reopen = null;
-        while (true)
-        {
-            var form = new MainForm(settings, startHidden, showEvent, reopen: reopen);
-            Application.Run(form);
-            if (form.Reopen == null) break;
-
-            // Смена темы или языка, мастер настройки: перечитать ресурсы и открыть окно заново.
-            reopen = form.Reopen;
-            startHidden = false;
-            if (!settings.SetupDone)
-            {
-                RunSetup(settings);
-                reopen = reopen with { Selected = settings.Controls[0], Layer = 0 };
-            }
-            Notices.Clear();
-            LoadResources(settings);
-            settings.Normalize();
-        }
+        // Одно окно на всё время работы: мастер первого запуска, настройки и смена темы или языка — внутри него.
+        Application.Run(new MainForm(settings, args.Contains("--tray"), showEvent));
         return 0;
     }
 
@@ -177,6 +175,16 @@ internal static class Program
             form.Close();
         };
         Application.Run(form);
+    }
+
+    /// <summary>Окно размером с главное, в котором показана одна страница (для снимков вёрстки).</summary>
+    static Form PageHost(Control page)
+    {
+        var host = new Form { Text = Branding.AppName, BackColor = Theme.Window, AutoScaleMode = AutoScaleMode.None, ClientSize = new Size(Theme.S(1180), Theme.S(760)) };
+        page.Dock = DockStyle.Fill;
+        host.Controls.Add(page);
+        Theme.ApplyTo(host);
+        return host;
     }
 
     /// <summary>Невидимое окно, которое открывает модальный диалог — чтобы снять и его.</summary>
@@ -219,29 +227,11 @@ internal static class Program
         public string? SnapshotPath { get; set; }
     }
 
-    /// <summary>Мастер первого запуска: язык, тема, плата. Выбранное сохраняется сразу.</summary>
-    static void RunSetup(AppSettings settings)
-    {
-        Application.Run(new SetupWizardForm(settings));
-        settings.SetupDone = true;
-        try
-        {
-            SettingsStore.Save(settings);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Не сохранилось — мастер покажется ещё раз при следующем запуске.
-        }
-        Notices.Clear();
-        LoadResources(settings);
-        settings.Normalize();
-    }
-
     /// <summary>
     /// Языки, драйверы и темы из папок рядом с программой. Если каких-то файлов нет, работают встроенные
     /// настройки, а в окне появится уведомление.
     /// </summary>
-    static void LoadResources(AppSettings settings)
+    internal static void LoadResources(AppSettings settings)
     {
         L.Load(settings.Language);
         DriverStore.Load();

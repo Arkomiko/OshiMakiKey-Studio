@@ -37,7 +37,7 @@
       "request": "launch",
       "preLaunchTask": "build",
       "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
-      "args": ["--snapshot", "${workspaceFolder}/MacroPadStudio/bin/Debug/snapshot.png", "--theme", "dark", "--lang", "en"],
+      "args": ["--snapshot", "${workspaceFolder}/MacroPadStudio/bin/Debug/snapshot.png", "--theme", "dark-blue", "--lang", "en"],
       "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
       "console": "internalConsole"
     },

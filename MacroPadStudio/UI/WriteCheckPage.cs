@@ -10,7 +10,7 @@ namespace OshiMakiKey.UI;
 /// По пришедшим буквам видно, работает ли запись, и какие номера у поворотов и нажатия ручки на этой плате.
 /// Всё, что прислала плата, пишется в журнал.
 /// </summary>
-internal sealed class ProtocolWizardForm : Form
+internal sealed class WriteCheckPage : UserControl
 {
     abstract record Step;
     sealed record PressStep(ControlId Control) : Step;
@@ -53,22 +53,19 @@ internal sealed class ProtocolWizardForm : Form
     /// <summary>Найденные номера кнопок ручки: влево, нажатие, вправо (null — не найдены).</summary>
     public List<int>? KnobSlots { get; private set; }
 
-    public ProtocolWizardForm(DriverDef driver)
+    /// <summary>Мастер закончен или закрыт: смотрите <see cref="Result"/> и <see cref="KnobSlots"/>.</summary>
+    public event EventHandler? Finished;
+
+    public WriteCheckPage(DriverDef driver)
     {
         _driver = driver;
         KeyIds = driver.Controls.Where(Model.Controls.IsKey).ToArray();
         KnobIds = driver.Controls.Where(c => !Model.Controls.IsKey(c)).ToArray();
 
-        Text = L.T("wizard.title", "Проверка записи") + " — " + Branding.AppName;
-        Icon = Theme.AppIcon;
         Font = Theme.Body;
         BackColor = Theme.Surface;
         AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = MinimizeBox = false;
-        ClientSize = new Size(Theme.S(680), Theme.S(600));
-        KeyPreview = true;
+        Dock = DockStyle.Fill;
 
         var root = new TableLayoutPanel
         {
@@ -110,6 +107,11 @@ internal sealed class ProtocolWizardForm : Form
         _skip.Click += (_, _) => OnSkip();
         buttons.Controls.Add(_primary);
         buttons.Controls.Add(_skip);
+        // Выход со страницы в любой момент (раньше это был крестик окна).
+        var cancel = new Button { Text = L.T("button.cancel", "Отмена") };
+        StyleButton(cancel, primary: false);
+        cancel.Click += (_, _) => { if (!_busy) Finished?.Invoke(this, EventArgs.Empty); };
+        buttons.Controls.Add(cancel);
 
         root.Controls.Add(_title, 0, 0);
         root.Controls.Add(_progress, 0, 1);
@@ -139,7 +141,8 @@ internal sealed class ProtocolWizardForm : Form
             Log(L.F("wizard.log.logError", "Не удалось открыть monitor.log: {0} — протокол сохранится отдельным файлом", logError));
         ShowIntro();
         UpdateDeviceStatus();
-        Theme.ApplyTo(this);
+        ForeColor = Theme.Text;
+        Theme.Style(this);
     }
 
     static void StyleButton(Button button, bool primary)
@@ -316,8 +319,7 @@ internal sealed class ProtocolWizardForm : Form
         }
         if (_index >= _steps.Count)
         {
-            DialogResult = Result != null ? DialogResult.OK : DialogResult.Cancel;
-            Close();
+            Finished?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -337,7 +339,13 @@ internal sealed class ProtocolWizardForm : Form
         if (RawInput.Register(Handle) is string error) Log(L.F("monitor.registerError", "ОШИБКА подписки на ввод: {0}", error));
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) Cleanup();
+        base.Dispose(disposing);
+    }
+
+    void Cleanup()
     {
         RawInput.Unregister();
         _quiet.Dispose();
@@ -346,7 +354,12 @@ internal sealed class ProtocolWizardForm : Form
         // Мастер закрыли раньше итога — протокол всё равно сохраняем.
         if (_savedPath == null && _started) SaveProtocol();
         _file?.Dispose();
-        base.OnFormClosed(e);
+    }
+
+    /// <summary>Окно получило WM_DEVICECHANGE (его шлют только окнам верхнего уровня) — передаёт сюда.</summary>
+    public void DeviceChanged()
+    {
+        if (IsHandleCreated) BeginInvoke(OnDeviceChange);
     }
 
     /// <summary>Отдельный файл с полным протоколом — на случай, если monitor.log был недоступен.</summary>
@@ -371,10 +384,6 @@ internal sealed class ProtocolWizardForm : Form
             DriverStore.IsPadDeviceName(RawInput.DeviceName(input.Device)))
         {
             OnPadInput(input);
-        }
-        else if (m.Msg == Win32.WM_DEVICECHANGE)
-        {
-            BeginInvoke(OnDeviceChange);
         }
         base.WndProc(ref m);
     }

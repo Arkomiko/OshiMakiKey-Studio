@@ -5,10 +5,10 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.UI;
 
 /// <summary>
-/// Окно настроек: разделы слева, содержимое справа. Изменения применяются по «Готово»; тема и язык — через
-/// пересоздание главного окна, служба OMK_Studio-Service — сразу кнопками.
+/// Страница настроек внутри главного окна: разделы слева, содержимое справа. Изменения применяются по «Готово»
+/// (событие <see cref="Done"/>), «Отмена» — <see cref="Cancelled"/>. Служба OMK_Studio-Service управляется сразу кнопками.
 /// </summary>
-internal sealed class SettingsForm : Form
+internal sealed class SettingsPage : UserControl
 {
     readonly AppSettings _settings;
     readonly (ushort Vid, ushort Pid)? _connected;
@@ -26,14 +26,18 @@ internal sealed class SettingsForm : Form
     string? _servicePreset;
     Label? _serviceStatus;
 
-    public bool NeedsReopen { get; private set; }
+    /// <summary>Тема или язык изменились — главное окно перестроит содержимое.</summary>
+    public bool AppearanceChanged { get; private set; }
     public bool DriverChanged { get; private set; }
     public bool RerunSetup { get; private set; }
     public bool ShowTour { get; private set; }
 
     readonly int _startPage;
 
-    public SettingsForm(AppSettings settings, (ushort Vid, ushort Pid)? connected, int startPage = 0)
+    public event EventHandler? Done;
+    public event EventHandler? Cancelled;
+
+    public SettingsPage(AppSettings settings, (ushort Vid, ushort Pid)? connected, int startPage = 0)
     {
         _startPage = startPage;
         _settings = settings;
@@ -48,17 +52,10 @@ internal sealed class SettingsForm : Form
         _noRepeat = settings.NoKeyRepeat;
         _servicePreset = settings.ServicePreset;
 
-        Text = L.T("settings.title", "Настройки") + " — " + Branding.AppName;
-        Icon = Theme.AppIcon;
         Font = Theme.Body;
         BackColor = Theme.Window;
         AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.Sizable;
-        MaximizeBox = MinimizeBox = false;
-        ShowInTaskbar = false;
-        ClientSize = new Size(Theme.S(920), Theme.S(640));
-        MinimumSize = new Size(Theme.S(760), Theme.S(520));
+        Dock = DockStyle.Fill;
 
         // Разделы
         var sidebar = new Panel { Dock = DockStyle.Left, Width = Theme.S(230), BackColor = Theme.Surface, Padding = new Padding(Theme.S(12), Theme.S(16), Theme.S(12), Theme.S(12)) };
@@ -101,14 +98,12 @@ internal sealed class SettingsForm : Form
             BackColor = Theme.Surface,
         };
         var cancel = ThemedDialog.MakeButton(L.T("button.cancel", "Отмена"), primary: false);
-        cancel.DialogResult = DialogResult.Cancel;
+        cancel.Click += (_, _) => Cancelled?.Invoke(this, EventArgs.Empty);
         var done = ThemedDialog.MakeButton(L.T("button.done", "Готово"), primary: true);
         done.Click += (_, _) => Apply();
         bottom.Controls.Add(cancel);
         bottom.Controls.Add(done);
         var bottomLine = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Border };
-        AcceptButton = done;
-        CancelButton = cancel;
 
         Controls.Add(_content);
         Controls.Add(_pageTitle);
@@ -116,7 +111,18 @@ internal sealed class SettingsForm : Form
         Controls.Add(bottom);
         Controls.Add(sidebarLine);
         Controls.Add(sidebar);
-        Theme.ApplyTo(this);
+        ForeColor = Theme.Text;
+        Theme.Style(this);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            Cancelled?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     // Раздел строится, когда размеры окна уже известны: карточки раскладываются по ширине.
@@ -354,8 +360,12 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(Hint(L.F("settings.service.hint",
             "{0} выполняет громкость, треки и другие действия кнопок, когда окно программы закрыто. Она запускается вместе с Windows, не показывает окон и уступает клавиши, пока открыта программа.",
             OmkService.Name)));
+        // Частый вопрос: «службы нет в services.msc». Это сделано намеренно — объясняем, где её искать.
+        page.Controls.Add(Hint(L.F("settings.service.where",
+            "Это не служба из списка «Службы» Windows: такие службы работают в отдельном сеансе без доступа к клавиатуре, звуку и окнам. {0} — фоновый процесс в автозагрузке: «Диспетчер задач → Автозагрузка», процесс OshiMakiKeyStudio.exe.",
+            OmkService.Name)));
 
-        _serviceStatus = new Label { AutoSize = true, Font = Theme.Strong, Margin = new Padding(0, 0, 0, Theme.S(14)) };
+        _serviceStatus =new Label { AutoSize = true, Font = Theme.Strong, Margin = new Padding(0, 0, 0, Theme.S(14)) };
         page.Controls.Add(_serviceStatus);
         UpdateServiceStatus();
 
@@ -457,7 +467,7 @@ internal sealed class SettingsForm : Form
 
     void Apply()
     {
-        NeedsReopen = _theme != ThemeStore.Current.Id || _language != L.Code;
+        AppearanceChanged = _theme != ThemeStore.Current.Id || _language != L.Code;
         if (_theme != ThemeStore.Current.Id) _settings.Theme = _theme;
         if (_language != L.Code) _settings.Language = _language;
 
@@ -477,7 +487,7 @@ internal sealed class SettingsForm : Form
                     new[] { L.T("button.ok", "ОК") }, DialogKind.Warning, cancelIndex: 0);
             }
         }
-        DialogResult = DialogResult.OK;
+        Done?.Invoke(this, EventArgs.Empty);
     }
 
     protected override void Dispose(bool disposing)

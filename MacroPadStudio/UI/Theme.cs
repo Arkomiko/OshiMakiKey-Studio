@@ -217,19 +217,23 @@ internal static class Theme
         }
     }
 
+    [DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
     [DllImport("dwmapi.dll")]
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     static extern int SetWindowTheme(IntPtr hwnd, string? subAppName, string? subIdList);
 
-    static void DarkTitleBar(Form form)
+    /// <summary>Тёмный или светлый заголовок окна по текущей теме; перерисовывает рамку, чтобы смена была видна сразу.</summary>
+    public static void DarkTitleBar(Form form)
     {
-        if (!Dark) return;
-        int on = 1;
+        int on = Dark ? 1 : 0;
         // 20 — Windows 10 20H1 и новее, 19 — более ранние сборки Windows 10.
         if (DwmSetWindowAttribute(form.Handle, 20, ref on, sizeof(int)) != 0)
             DwmSetWindowAttribute(form.Handle, 19, ref on, sizeof(int));
+        if (form.Visible) SetWindowPos(form.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
     }
 
     static void DarkScrollBars(Control control)

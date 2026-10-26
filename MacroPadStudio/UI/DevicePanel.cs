@@ -31,6 +31,12 @@ internal sealed class DevicePanel : Control
     bool _dragging;
     ControlId? _dropTarget;
 
+    // Кнопка, на которую только что бросили действие: коротко подсвечивается, чтобы было видно, куда оно попало.
+    ControlId? _flash;
+    readonly System.Windows.Forms.Timer _flashTimer = new() { Interval = 900 };
+    // Подсказка над рисунком: что делает кнопка или сторона ручки под курсором.
+    readonly ToolTip _tip = new();
+
     public event EventHandler<ControlId>? SelectionChanged;
     public event EventHandler<ActionDrop>? ActionDropped;
 
@@ -82,6 +88,35 @@ internal sealed class DevicePanel : Control
         BackColor = Theme.Surface;
         Font = Theme.Body;
         TabStop = true;
+        _flashTimer.Tick += (_, _) =>
+        {
+            _flashTimer.Stop();
+            _flash = null;
+            Invalidate();
+        };
+    }
+
+    /// <summary>Коротко подсвечивает кнопку (после переноса действия).</summary>
+    public void Flash(ControlId id)
+    {
+        _flash = id;
+        _flashTimer.Stop();
+        _flashTimer.Start();
+        EnsureVisible(id);
+        Invalidate();
+    }
+
+    /// <summary>Подсвечена ли кнопка: под курсором, цель перетаскивания или только что получила действие.</summary>
+    bool Lit(ControlId id) => _hover == id || _flash == id || (_dragging && _dropTarget == id);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _flashTimer.Dispose();
+            _tip.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     // ───────────────────────── Раскладка ─────────────────────────
@@ -202,7 +237,7 @@ internal sealed class DevicePanel : Control
     void DrawKey(Graphics g, ControlId id, RectangleF rect)
     {
         float s = Theme.Scale;
-        bool selected = id == _selected, hover = id == _hover;
+        bool selected = id == _selected, hover = Lit(id);
 
         using (var shadow = Theme.Rounded(new RectangleF(rect.X, rect.Y + 3 * s, rect.Width, rect.Height), 9 * s))
         using (var brush = new SolidBrush(Color.FromArgb(110, 0, 0, 0)))
@@ -212,7 +247,7 @@ internal sealed class DevicePanel : Control
         var top = selected ? Theme.KeySelectedTop : hover ? Theme.KeyHover : Theme.KeyTop;
         var bottom = selected ? Theme.KeySelectedBottom : Theme.KeyBottom;
         using (var brush = new LinearGradientBrush(rect, top, bottom, 90f)) g.FillPath(brush, cap);
-        if (selected)
+        if (selected || _flash == id)
             using (var pen = new Pen(Theme.Accent, 3 * s)) g.DrawPath(pen, cap);
 
         bool small = rect.Width < 48 * s;
@@ -268,7 +303,7 @@ internal sealed class DevicePanel : Control
         DrawGlyph(g, "↺", new RectangleF(center.X - glyphOffset - glyphSize / 2, center.Y - glyphSize / 2, glyphSize, glyphSize), left, font);
         DrawGlyph(g, "↻", new RectangleF(center.X + glyphOffset - glyphSize / 2, center.Y - glyphSize / 2, glyphSize, glyphSize), right, font);
 
-        bool selected = _selected == press, hover = _hover == press;
+        bool selected = _selected == press || _flash == press, hover = Lit(press);
         float capRadius = radius * 0.45f;
         var capRect = new RectangleF(center.X - capRadius, center.Y - capRadius, capRadius * 2, capRadius * 2);
         var top = selected ? Theme.KnobGlow : hover ? Theme.KnobCapHover : Theme.KnobCap;
@@ -283,7 +318,8 @@ internal sealed class DevicePanel : Control
 
     void DrawKnobArc(Graphics g, RectangleF knob, ControlId id, float start, float sweep)
     {
-        bool selected = _selected == id, hover = _hover == id;
+        // Цель перетаскивания и только что заполненная сторона рисуются ярко, как выбранная.
+        bool selected = _selected == id || _flash == id || (_dragging && _dropTarget == id), hover = _hover == id;
         if (!selected && !hover) return;
         float s = Theme.Scale;
         float width = knob.Width > 60 * s ? 7 * s : 5 * s;
@@ -298,7 +334,7 @@ internal sealed class DevicePanel : Control
 
     void DrawGlyph(Graphics g, string glyph, RectangleF rect, ControlId id, Font font)
     {
-        var color = _selected == id ? Theme.KnobGlyph : Color.FromArgb(_hover == id ? 230 : 170, Theme.KnobGlyph);
+        var color = _selected == id ? Theme.KnobGlyph : Color.FromArgb(Lit(id) ? 230 : 170, Theme.KnobGlyph);
         TextRenderer.DrawText(g, glyph, font, Rectangle.Round(RectangleF.Inflate(rect, 6, 6)), color,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
     }
@@ -306,7 +342,7 @@ internal sealed class DevicePanel : Control
     void DrawRow(Graphics g, ControlId id, RectangleF rect)
     {
         float s = Theme.Scale;
-        bool selected = id == _selected, hover = id == _hover;
+        bool selected = id == _selected, hover = id == _hover || id == _flash;
 
         if (selected || hover)
         {
@@ -384,10 +420,11 @@ internal sealed class DevicePanel : Control
         }
 
         if (_pressed is not ControlId source || ActionProvider?.Invoke(source) is not { } action) return;
-        string text = BindingText.Compact(action);
+        // Рядом с действием — куда оно попадёт: у ручки так видно, какая именно сторона под курсором.
+        string text = BindingText.Compact(action) + (_dropTarget is ControlId to ? "  →  " + UiText.Title(to) : "");
         var size = TextRenderer.MeasureText(text, Theme.Small);
         float badge = copy ? 18 * s : 0;
-        var ghost = new RectangleF(_dragPoint.X + 14 * s, _dragPoint.Y + 10 * s, Math.Min(220 * s, size.Width + badge + 20 * s), 28 * s);
+        var ghost = new RectangleF(_dragPoint.X + 14 * s, _dragPoint.Y + 10 * s, Math.Min(340 * s, size.Width + badge + 20 * s), 28 * s);
         using (var shadow = Theme.Rounded(new RectangleF(ghost.X, ghost.Y + 3 * s, ghost.Width, ghost.Height), 8 * s))
         using (var brush = new SolidBrush(Color.FromArgb(50, 0, 0, 0)))
             g.FillPath(brush, shadow);
@@ -414,15 +451,46 @@ internal sealed class DevicePanel : Control
         if (_keys.TryGetValue(id, out var key)) return key;
         var row = RowOnScreen(id);
         if (_list.Contains(_dragPoint) && row.Contains(_dragPoint)) return row;
-        int knob = Model.Controls.KnobIndex(id);
-        return !Model.Controls.IsKey(id) && knob < _knobs.Count ? _knobs[knob] : null;
+        // Сторона ручки подсвечивается своей дугой (DrawKnobArc), рамка вокруг всей ручки только путала бы.
+        return null;
     }
 
     // ───────────────────────── Мышь и клавиатура ─────────────────────────
 
+    /// <summary>Самопроверка (--drop-test): точка внутри кнопки на рисунке — середина клавиши или нужная часть ручки.</summary>
+    internal Point PointOf(ControlId id, bool inList = false)
+    {
+        ComputeLayout();
+        if (inList)
+        {
+            EnsureVisible(id);
+            var row = RowOnScreen(id);
+            return Point.Round(new PointF(row.X + row.Width / 2, row.Y + row.Height / 2));
+        }
+        if (_keys.TryGetValue(id, out var key)) return Point.Round(new PointF(key.X + key.Width / 2, key.Y + key.Height / 2));
+        var knob = _knobs[Model.Controls.KnobIndex(id)];
+        float r = knob.Width / 2, cx = knob.X + r, cy = knob.Y + r;
+        return Point.Round(Model.Controls.KnobAction(id) switch { 0 => new PointF(cx - r * 0.75f, cy), 1 => new PointF(cx, cy), _ => new PointF(cx + r * 0.75f, cy) });
+    }
+
+    /// <summary>Самопроверка (--drop-test): то же, что делает мышь при перетаскивании.</summary>
+    internal void SimulateDrag(Point from, Point to, bool copy = false)
+    {
+        _forceCopy = copy;
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, from.X, from.Y, 0));
+        var middle = new Point((from.X + to.X) / 2, (from.Y + to.Y) / 2);
+        OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, middle.X, middle.Y, 0));
+        OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, to.X, to.Y, 0));
+        OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, to.X, to.Y, 0));
+        _forceCopy = null;
+    }
+
+    bool? _forceCopy;
+
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        _tip.Hide(this);
         Focus();
         if (e.Button != MouseButtons.Left) return;
         _pressed = HitTest(e.Location);
@@ -459,6 +527,10 @@ internal sealed class DevicePanel : Control
         if (hover == _hover) return;
         _hover = hover;
         Cursor = hover != null ? Cursors.Hand : Cursors.Default;
+        // В списке действие и так подписано; на рисунке (особенно у ручки) — подсказка.
+        if (hover is ControlId id && !_list.Contains(e.Location) && ActionProvider?.Invoke(id) is { } action)
+            _tip.Show(UiText.Title(id) + ": " + BindingText.Summary(action), this, e.X + 14, e.Y + 22, 5000);
+        else _tip.Hide(this);
         Invalidate();
     }
 
@@ -475,7 +547,7 @@ internal sealed class DevicePanel : Control
         base.OnMouseUp(e);
         if (_dragging && _pressed is ControlId source && _dropTarget is ControlId target)
         {
-            bool copy = (ModifierKeys & Keys.Control) != 0;
+            bool copy = _forceCopy ?? (ModifierKeys & Keys.Control) != 0;
             EndDrag();
             ActionDropped?.Invoke(this, new ActionDrop(source, target, copy));
         }
@@ -502,6 +574,7 @@ internal sealed class DevicePanel : Control
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
+        _tip.Hide(this);
         _hover = null;
         Invalidate();
     }

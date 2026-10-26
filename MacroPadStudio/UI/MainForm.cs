@@ -7,10 +7,12 @@ using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
 
-/// <summary>Что перенести в пересозданное окно (после смены темы или языка): положение, выбранную кнопку и слой.</summary>
-internal sealed record ReopenState(Rectangle Bounds, FormWindowState State, ControlId Selected, int Layer);
-
-/// <summary>Главное окно: схема устройства, редактор действия, пресеты, запись в устройство, значок в трее и фоновый агент.</summary>
+/// <summary>
+/// Главное и единственное окно программы (кроме монитора нажатий): схема устройства, редактор действия, пресеты,
+/// запись в устройство, значок в трее и фоновый агент. Настройки, мастер первого запуска, проверка записи и
+/// «О программе» открываются страницами на месте основного содержимого (<see cref="ShowPage"/>), а смена темы
+/// или языка перестраивает содержимое этого же окна (<see cref="BuildUi"/>) — окно не закрывается.
+/// </summary>
 internal sealed class MainForm : Form
 {
     const string AppName = Branding.AppName;
@@ -33,47 +35,83 @@ internal sealed class MainForm : Form
     MonitorForm? _monitor;
     TourOverlay? _tour;
 
-    readonly DevicePanel _pad = new();
-    readonly BindingEditor _editor = new();
-    readonly NoticeBar _notices = new();
-    readonly StatusDot _deviceDot = new();
-    readonly Label _deviceText = new();
-    readonly Label _writeState = new();
-    readonly Panel _deviceColumn = new();
-    readonly Label _presetLabel = new();
-    readonly ThemedComboBox _presetBox = new();
-    readonly Button _savePreset = new();
-    readonly Button _presetMore = new();
-    readonly ContextMenuStrip _presetMenu = new();
-    readonly Label _layerLabel = new();
-    readonly ThemedComboBox _layerBox = new();
-    readonly Button _writeButton = new();
-    readonly MenuStrip _menu = new();
-    readonly StatusStrip _statusStrip = new();
-    readonly ToolStripStatusLabel _status = new();
-    readonly ToolStripStatusLabel _driverStatus = new();
-    readonly ToolStripStatusLabel _agentStatus = new();
+    // Элементы интерфейса создаются заново в BuildUi при каждой смене темы или языка, поэтому они не readonly.
+    DevicePanel _pad = null!;
+    BindingEditor _editor = null!;
+    NoticeBar _notices = null!;
+    StatusDot _deviceDot = null!;
+    Label _deviceText = null!;
+    Label _writeState = null!;
+    Panel _deviceColumn = null!;
+    Label _presetLabel = null!;
+    ThemedComboBox _presetBox = null!;
+    Button _savePreset = null!;
+    Button _presetMore = null!;
+    ContextMenuStrip _presetMenu = null!;
+    Label _layerLabel = null!;
+    ThemedComboBox _layerBox = null!;
+    Button _writeButton = null!;
+    MenuStrip _menu = null!;
+    StatusStrip _statusStrip = null!;
+    ToolStripStatusLabel _status = null!;
+    ToolStripStatusLabel _driverStatus = null!;
+    ToolStripStatusLabel _agentStatus = null!;
+    ToolStripMenuItem _layersMenu = null!;
+    ToolStripMenuItem _deletePresetItem = null!;
+    ToolStripMenuItem _wizardItem = null!;
+    ToolStripMenuItem _autoDriverItem = null!;
+    readonly List<ToolStripMenuItem> _layerItems = new();
+    readonly Dictionary<string, ToolStripMenuItem> _driverItems = new();
     readonly ToolTip _tips = new();
     readonly NotifyIcon _tray = new();
     readonly HotkeyAgent? _agent;
     readonly HoldFilter _holdFilter = new();
     readonly System.Windows.Forms.Timer _deviceTimer = new() { Interval = 400 };
     readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 700 };
-    readonly ToolStripMenuItem _layersMenu = new(L.T("menu.layers", "Количество слоёв"));
-    readonly ToolStripMenuItem _deletePresetItem = new(L.T("menu.preset.delete", "Удалить пресет"));
-    readonly ToolStripMenuItem _wizardItem = new(L.T("menu.wizard", "Проверить запись…"));
-    readonly List<ToolStripMenuItem> _layerItems = new();
-    readonly Dictionary<string, ToolStripMenuItem> _driverItems = new();
-    readonly ToolStripMenuItem _autoDriverItem = new();
+
+    /// <summary>Открытые страницы; верхняя показана вместо основного содержимого (проверка записи — поверх мастера).</summary>
+    readonly Stack<Control> _pages = new();
+    /// <summary>Основные элементы, скрытые на время показа страниц.</summary>
+    List<Control> _hiddenMain = new();
 
     /// <summary>Для --snapshot --tour N: снимок окна с открытым шагом тура.</summary>
     public int SnapshotTourStep { get; set; } = -1;
 
-    /// <summary>Не null — окно закрыто, чтобы открыться заново с новой темой, языком или после мастера настройки.</summary>
-    public ReopenState? Reopen { get; private set; }
+    /// <summary>Для --snapshot --switch-theme/--switch-lang: сменить тему или язык уже открытого окна перед снимком.</summary>
+    public (string? Theme, string? Language) SnapshotSwitch { get; set; }
 
-    public MainForm(AppSettings settings, bool startHidden, EventWaitHandle? showEvent, string? snapshotPath = null,
-        ControlId? select = null, ReopenState? reopen = null)
+    /// <summary>Для --snapshot --page settings|about|setup: снимок окна с открытой страницей.</summary>
+    public string? SnapshotPage { get; set; }
+
+    /// <summary>
+    /// Самопроверка перетаскивания (--drop-test): по очереди тащит клавишу 5 на каждое действие ручки и проверяет,
+    /// что действие оказалось там, куда его бросили. Возвращает строки PASS/FAIL.
+    /// </summary>
+    public List<string> RunDropTest()
+    {
+        var report = new List<string>();
+        _settings.ConfirmOverwrite = false;
+        var targets = _settings.Controls.Where(c => !Model.Controls.IsKey(c)).Append(ControlId.Key1).ToList();
+        foreach (var (inList, copy) in new[] { (false, false), (true, false), (false, true) })
+        {
+            foreach (var target in targets)
+            {
+                _settings.Profile = Profile.CreateDefault();
+                AfterProfileReplaced();
+                string expected = BindingText.Summary(CurrentLayer.Get(ControlId.Key5));
+                _pad.SimulateDrag(_pad.PointOf(ControlId.Key5, inList), _pad.PointOf(target, inList), copy);
+                string actual = BindingText.Summary(CurrentLayer.Get(target));
+                bool sourceOk = copy ? CurrentLayer.Get(ControlId.Key5).Kind == ActionKind.Media : CurrentLayer.Get(ControlId.Key5).Kind == ActionKind.None;
+                bool written = ProfileCompiler.Compile(_settings).Count > 0 && _settings.NeedsAgent(CurrentLayer.Get(target)) == true
+                               && CurrentLayer.Get(target).TriggerSlot != null;
+                bool ok = actual == expected && sourceOk && written;
+                report.Add($"{(ok ? "PASS" : "FAIL")}  {(inList ? "список" : "рисунок")}{(copy ? ", копия" : "")}: Клавиша 5 → {UiText.Title(target)}: «{actual}», служебная клавиша {CurrentLayer.Get(target).TriggerSlot?.ToString() ?? "нет"}");
+            }
+        }
+        return report;
+    }
+
+    public MainForm(AppSettings settings, bool startHidden, EventWaitHandle? showEvent, string? snapshotPath = null, ControlId? select = null)
     {
         _settings = settings;
         _showEvent = showEvent;
@@ -91,37 +129,14 @@ internal sealed class MainForm : Form
         var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
         ClientSize = new Size(Math.Min(Theme.S(1180), workArea.Width - 40), Math.Min(Theme.S(760), workArea.Height - 60));
         MinimumSize = new Size(Math.Min(Theme.S(1060), workArea.Width), Math.Min(Theme.S(700), workArea.Height));
-        if (reopen != null)
+
+        _tray.Icon = Theme.SmallIcon;
+        _tray.Text = AppName;
+        _tray.MouseClick += (_, e) =>
         {
-            StartPosition = FormStartPosition.Manual;
-            Bounds = reopen.Bounds;
-            if (reopen.State == FormWindowState.Maximized) WindowState = FormWindowState.Maximized;
-            _layer = reopen.Layer;
-            select ??= reopen.Selected;
-        }
-
-        UiText.Driver = _settings.EffectiveDriver;
-        _pad.Driver = _settings.EffectiveDriver;
-
-        BuildMenu();
-        Controls.Add(BuildBody());
-        Controls.Add(_notices);
-        Controls.Add(BuildHeader());
-        Controls.Add(BuildStatusBar());
-        Controls.Add(_menu);
-        MainMenuStrip = _menu;
-        BuildTray();
-        Theme.ApplyTo(this);
-
-        _pad.ActionProvider = id => CurrentLayer.Get(id);
-        _pad.NeedsAgent = _settings.NeedsAgent;
-        _pad.SelectionChanged += (_, id) => SelectControl(id);
-        _pad.ActionDropped += (_, drop) => OnActionDropped(drop);
-        _editor.ActionChanged += (_, _) => OnActionEdited();
-        _editor.TestRequested += (_, _) =>
-        {
-            if (_editor.Action is { } action) _ = RunActionAsync(action, fromTest: true);
+            if (e.Button == MouseButtons.Left) ShowFromTray();
         };
+        _tray.Visible = _interactive;
         _deviceTimer.Tick += (_, _) => RefreshDevice();
         _saveTimer.Tick += (_, _) => SaveNow();
 
@@ -134,19 +149,92 @@ internal sealed class MainForm : Form
 
         _settings.EnsureTriggers();
         _savedSnapshot = SavedSnapshotOf(_settings.ActivePreset);
+        BuildUi(select);
+    }
+
+    Layer CurrentLayer => _settings.Profile.Layers[_layer];
+
+    // ───────────────────────── Построение интерфейса ─────────────────────────
+
+    /// <summary>
+    /// Строит содержимое окна в текущих теме и языке. При повторном вызове старые элементы удаляются и создаются
+    /// заново; пресет, слой и выбранная кнопка сохраняются, открытые страницы остаются на месте.
+    /// </summary>
+    void BuildUi(ControlId? select)
+    {
+        SuspendLayout();
+        foreach (var control in Controls.Cast<Control>().Where(c => !_pages.Contains(c) && c != _tour).ToList())
+        {
+            Controls.Remove(control);
+            control.Dispose();
+        }
+        _presetMenu?.Dispose();
+        _tips.RemoveAll();
+        _layerItems.Clear();
+        _driverItems.Clear();
+
+        _pad = new DevicePanel();
+        _editor = new BindingEditor();
+        _notices = new NoticeBar();
+        _deviceDot = new StatusDot();
+        _deviceText = new Label();
+        _writeState = new Label();
+        _deviceColumn = new Panel();
+        _presetLabel = new Label();
+        _presetBox = new ThemedComboBox();
+        _savePreset = new Button();
+        _presetMore = new Button();
+        _presetMenu = new ContextMenuStrip();
+        _layerLabel = new Label();
+        _layerBox = new ThemedComboBox();
+        _writeButton = new Button();
+        _menu = new MenuStrip();
+        _statusStrip = new StatusStrip();
+        _status = new ToolStripStatusLabel();
+        _driverStatus = new ToolStripStatusLabel();
+        _agentStatus = new ToolStripStatusLabel();
+        _layersMenu = new ToolStripMenuItem(L.T("menu.layers", "Количество слоёв"));
+        _deletePresetItem = new ToolStripMenuItem(L.T("menu.preset.delete", "Удалить пресет"));
+        _wizardItem = new ToolStripMenuItem(L.T("menu.wizard", "Проверить запись…"));
+        _autoDriverItem = new ToolStripMenuItem();
+
+        BackColor = Theme.Window;
+        _settings.EnsureTriggers();
+        UiText.Driver = _settings.EffectiveDriver;
+        _pad.Driver = _settings.EffectiveDriver;
+
+        BuildMenu();
+        Controls.Add(BuildBody());
+        Controls.Add(_notices);
+        Controls.Add(BuildHeader());
+        Controls.Add(BuildStatusBar());
+        Controls.Add(_menu);
+        MainMenuStrip = _menu;
+        BuildTrayMenu();
+        Theme.ApplyTo(this);
+
+        _pad.ActionProvider = id => CurrentLayer.Get(id);
+        _pad.NeedsAgent = _settings.NeedsAgent;
+        _pad.SelectionChanged += (_, id) => SelectControl(id);
+        _pad.ActionDropped += (_, drop) => OnActionDropped(drop);
+        _editor.ActionChanged += (_, _) => OnActionEdited();
+        _editor.TestRequested += (_, _) =>
+        {
+            if (_editor.Action is { } action) _ = RunActionAsync(action, fromTest: true);
+        };
+        if (_pages.Count > 0) HideMain();
+        ResumeLayout(true);
+
         RefreshDevice();
         RefreshPresets();
         RebuildLayerUi();
         UpdateDriverMenu();
         SelectControl(select is ControlId id && _settings.Controls.Contains(id) ? id : _settings.Controls[0]);
         UpdateDirty();
+        _registeredSlots = new(); // строка состояния новая — пусть агент заново покажет своё состояние
         ApplyAgent();
         SetStatus(L.T("status.ready", "Выберите клавишу или действие ручки слева, настройте его справа и нажмите «Записать в устройство»."));
     }
-
-    Layer CurrentLayer => _settings.Profile.Layers[_layer];
-
-    // ───────────────────────── Построение интерфейса ─────────────────────────
 
     void BuildMenu()
     {
@@ -175,7 +263,7 @@ internal sealed class MainForm : Form
         var device = new ToolStripMenuItem(L.T("menu.device", "Устройство"));
         device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.write", "Записать в устройство"), null, async (_, _) => await WriteToDeviceAsync()) { ShortcutKeys = Keys.F5 });
         device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.monitor", "Монитор нажатий…"), null, (_, _) => ShowMonitor()) { ShortcutKeys = Keys.F8 });
-        _wizardItem.Click += (_, _) => ShowWizard();
+        _wizardItem.Click += (_, _) => ShowWizard(null);
         device.DropDownItems.Add(_wizardItem);
         device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.refresh", "Обновить состояние"), null, (_, _) => RefreshDevice()));
         device.DropDownItems.Add(new ToolStripSeparator());
@@ -189,12 +277,12 @@ internal sealed class MainForm : Form
         }
         device.DropDownItems.Add(_layersMenu);
 
-        // «Настройки» — не список, а отдельное окно.
+        // «Настройки» — не список, а страница в этом же окне.
         var options = new ToolStripMenuItem(L.T("menu.settings", "Настройки"), null, (_, _) => ShowSettings());
 
         var help = new ToolStripMenuItem(L.T("menu.help", "Справка"));
         help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.howItWorks", "Как это работает"), null, (_, _) => StartTour()) { ShortcutKeys = Keys.F1 });
-        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.setup", "Мастер первого запуска…"), null, (_, _) => RerunSetup()));
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.setup", "Мастер первого запуска…"), null, (_, _) => ShowSetup()));
         help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.updates", "Проверить обновления и файлы")) { Enabled = false, ToolTipText = L.T("menu.updates.soon", "Скоро") });
         help.DropDownItems.Add(new ToolStripSeparator());
@@ -404,7 +492,8 @@ internal sealed class MainForm : Form
         return _statusStrip;
     }
 
-    void BuildTray()
+    /// <summary>Меню значка в трее (пересоздаётся вместе с интерфейсом — на нём подписи текущего языка).</summary>
+    void BuildTrayMenu()
     {
         var menu = new ContextMenuStrip();
         var open = new ToolStripMenuItem(L.F("tray.open", "Открыть {0}", AppName), null, (_, _) => ShowFromTray());
@@ -415,14 +504,9 @@ internal sealed class MainForm : Form
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(L.T("menu.exit", "Выход"), null, (_, _) => ExitApp()));
 
+        var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
-        _tray.Icon = Theme.SmallIcon;
-        _tray.Text = AppName;
-        _tray.MouseClick += (_, e) =>
-        {
-            if (e.Button == MouseButtons.Left) ShowFromTray();
-        };
-        _tray.Visible = _interactive;
+        old?.Dispose();
     }
 
     // ───────────────────────── Окно и трей ─────────────────────────
@@ -457,14 +541,33 @@ internal sealed class MainForm : Form
         base.OnShown(e);
         if (_snapshotPath == null)
         {
-            // Первый запуск: после мастера настройки — тур по окну, затем предложение включить службу.
-            if (!_settings.TourDone && Visible) BeginInvoke(StartTour);
+            // Первый запуск: мастер настройки страницей в окне, после него — тур, затем предложение включить службу.
+            if (!_settings.SetupDone && Visible) BeginInvoke(ShowSetup);
+            else if (!_settings.TourDone && Visible) BeginInvoke(StartTour);
             else if (Visible) BeginInvoke(OfferService);
             return;
         }
 
         // Режим --snapshot: сохранить картинку окна и выйти (для проверки вёрстки).
         await Task.Delay(500);
+        if (IsDisposed) return;
+        if (SnapshotSwitch.Theme != null || SnapshotSwitch.Language != null)
+        {
+            _settings.Theme = SnapshotSwitch.Theme ?? _settings.Theme;
+            _settings.Language = SnapshotSwitch.Language ?? _settings.Language;
+            ApplyAppearance();
+            await Task.Delay(300);
+        }
+        if (SnapshotPage != null)
+        {
+            ShowPage(SnapshotPage switch
+            {
+                "about" => new AboutPage(_settings),
+                "setup" => new SetupPage(_settings),
+                _ => new SettingsPage(_settings, null),
+            });
+            await Task.Delay(400);
+        }
         if (SnapshotTourStep >= 0)
         {
             StartTour(force: true);
@@ -497,7 +600,8 @@ internal sealed class MainForm : Form
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate();
         BringToFront();
-        if (!_settings.TourDone && _tour == null) BeginInvoke(StartTour);
+        if (!_settings.SetupDone) BeginInvoke(ShowSetup);
+        else if (!_settings.TourDone && _tour == null) BeginInvoke(StartTour);
     }
 
     void ShowMonitor()
@@ -507,7 +611,11 @@ internal sealed class MainForm : Form
             _monitor.Activate();
             return;
         }
-        _monitor = new MonitorForm();
+        _monitor = new MonitorForm
+        {
+            // Монитор подписывает события платы названием кнопки, которой назначено такое действие.
+            FindControl = match => _settings.Controls.Where(id => match(CurrentLayer.Get(id))).Select(UiText.Title).FirstOrDefault(),
+        };
         _monitor.FormClosed += (_, _) => _monitor = null;
         if (Visible) _monitor.Show(this);
         else _monitor.Show();
@@ -515,16 +623,6 @@ internal sealed class MainForm : Form
 
     void ExitApp()
     {
-        _exiting = true;
-        Close();
-    }
-
-    /// <summary>Закрывает окно, чтобы программа открыла его заново: так применяются тема, язык и мастер настройки.</summary>
-    void RequestReopen()
-    {
-        if (!_interactive) return;
-        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-        Reopen = new ReopenState(bounds, WindowState, _pad.Selected, _layer);
         _exiting = true;
         Close();
     }
@@ -555,6 +653,7 @@ internal sealed class MainForm : Form
         _showWait?.Unregister(null);
         _agent?.Dispose();
         _tray.Visible = false;
+        _tray.ContextMenuStrip?.Dispose();
         _tray.Dispose();
         _deviceTimer.Dispose();
         _saveTimer.Dispose();
@@ -569,8 +668,17 @@ internal sealed class MainForm : Form
         {
             _deviceTimer.Stop();
             _deviceTimer.Start();
+            // Страница проверки записи ждёт переподключения клавиатуры, а это сообщение получают только окна.
+            foreach (var page in _pages.OfType<WriteCheckPage>()) page.DeviceChanged();
         }
         base.WndProc(ref m);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        // Пока открыта страница, горячие клавиши скрытого меню (F5, Ctrl+S…) не срабатывают.
+        if (_pages.Count > 0) return false;
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     // ───────────────────────── Логика ─────────────────────────
@@ -616,6 +724,7 @@ internal sealed class MainForm : Form
         if (!drop.Copy) layer.Actions[drop.Source] = new PadAction();
         AfterProfileReplaced();
         SelectControl(drop.Target);
+        _pad.Flash(drop.Target);
         SetStatus(drop.Copy
             ? L.F("status.copied", "Действие скопировано: {0} → {1}.", UiText.Title(drop.Source), UiText.Title(drop.Target))
             : L.F("status.moved", "Действие перенесено: {0} → {1}.", UiText.Title(drop.Source), UiText.Title(drop.Target)));
@@ -647,36 +756,51 @@ internal sealed class MainForm : Form
         _driverStatus.Text = L.F("status.driver", "Драйвер: {0}", _settings.EffectiveDriver.Title);
     }
 
-    async void ShowWizard()
+    /// <summary>
+    /// Проверка записи (только платы прямого формата): страницей в окне. Из мастера первого запуска —
+    /// поверх него, и по окончании возвращаемся в мастер.
+    /// </summary>
+    void ShowWizard(SetupPage? setup)
     {
-        if (_settings.EffectiveProtocol != ProtocolMode.Direct) return;
+        if (_settings.EffectiveProtocol != ProtocolMode.Direct || _tour != null || _pages.Any(p => p is WriteCheckPage)) return;
+        if (setup == null && _pages.Count > 0) return;
+        // Монитор тоже читает сырой ввод — на время проверки закрываем его.
         _monitor?.Close();
-        using var wizard = new ProtocolWizardForm(_settings.EffectiveDriver);
-        if (Visible) wizard.ShowDialog(this);
-        else wizard.ShowDialog();
-
-        // В клавиатуре теперь тестовые буквы — настройки придётся записать заново.
-        _settings.LastWrittenSignature = null;
-        if (wizard.Result is not ProtocolMode.Direct)
+        if (!Visible) ShowFromTray();
+        var page = new WriteCheckPage(_settings.EffectiveDriver);
+        page.Finished += async (_, _) =>
         {
-            UpdateDirty();
-            ScheduleSave();
-            return;
-        }
+            ClosePage();
+            // В клавиатуре теперь тестовые буквы — настройки придётся записать заново.
+            _settings.LastWrittenSignature = null;
+            var driver = _settings.EffectiveDriver;
+            if (page.Result is ProtocolMode.Direct && page.KnobSlots != null)
+            {
+                _settings.LearnedKnobSlots ??= new();
+                _settings.LearnedKnobSlots[driver.Id] = page.KnobSlots;
+            }
+            if (setup != null)
+            {
+                setup.Rebuild();
+                ScheduleSave();
+                return;
+            }
+            if (page.Result is not ProtocolMode.Direct)
+            {
+                UpdateDirty();
+                ScheduleSave();
+                return;
+            }
 
-        var driver = _settings.EffectiveDriver;
-        _settings.DriverId = driver.Id;
-        if (wizard.KnobSlots != null)
-        {
-            _settings.LearnedKnobSlots ??= new();
-            _settings.LearnedKnobSlots[driver.Id] = wizard.KnobSlots;
-        }
-        AfterDriverChanged();
-        RefreshDevice();
-        var (button, _) = ThemedDialog.Show(this, AppName, L.F("wizard.apply.heading", "Драйвер «{0}» сохранён", driver.Title),
-            L.T("wizard.apply.text", "Записать в клавиатуру ваши настройки?"),
-            new[] { L.T("header.write", "Записать в устройство"), L.T("button.later", "Позже") }, DialogKind.Question, cancelIndex: 1);
-        if (button == 0) await WriteToDeviceAsync();
+            _settings.DriverId = driver.Id;
+            AfterDriverChanged();
+            RefreshDevice();
+            var (button, _) = ThemedDialog.Show(this, AppName, L.F("wizard.apply.heading", "Драйвер «{0}» сохранён", driver.Title),
+                L.T("wizard.apply.text", "Записать в клавиатуру ваши настройки?"),
+                new[] { L.T("header.write", "Записать в устройство"), L.T("button.later", "Позже") }, DialogKind.Question, cancelIndex: 1);
+            if (button == 0) await WriteToDeviceAsync();
+        };
+        ShowPage(page);
     }
 
     void SetDriver(string? id)
@@ -836,10 +960,10 @@ internal sealed class MainForm : Form
         if (action == null) return;
         if (!_holdFilter.ShouldRun(slot, control, action))
         {
-            _monitor?.LogAgent($"{TriggerKeys.Describe(slot)} → {UiText.Title(control)}: {L.T("monitor.heldSkip", "удержание — повтор пропущен")}");
+            _monitor?.LogAgent(BindingText.Summary(action), $"{UiText.Title(control)} · {L.T("monitor.heldSkip", "удержание — повтор пропущен")}");
             return;
         }
-        _monitor?.LogAgent($"{TriggerKeys.Describe(slot)} → {UiText.Title(control)}: {BindingText.Summary(action)}");
+        _monitor?.LogAgent(BindingText.Summary(action), $"{UiText.Title(control)} · {TriggerKeys.Describe(slot)}");
         _ = RunActionAsync(action, fromTest: false);
     }
 
@@ -903,37 +1027,107 @@ internal sealed class MainForm : Form
         ScheduleSave();
     }
 
-    // ───────────────────────── Окна ─────────────────────────
+    // ───────────────────────── Страницы в окне ─────────────────────────
+
+    /// <summary>Показывает страницу на месте основного содержимого окна (меню, шапка и схема прячутся).</summary>
+    void ShowPage(Control page)
+    {
+        SuspendLayout();
+        if (_pages.TryPeek(out var top)) top.Visible = false;
+        else HideMain();
+        _pages.Push(page);
+        // Страницы раскладывают содержимое по своей ширине при первом показе — размер задаём до добавления.
+        page.Bounds = ClientRectangle;
+        page.Dock = DockStyle.Fill;
+        Controls.Add(page);
+        page.BringToFront();
+        ResumeLayout(true);
+        page.Select();
+    }
+
+    void HideMain()
+    {
+        _hiddenMain = Controls.Cast<Control>().Where(c => c.Visible && !_pages.Contains(c)).ToList();
+        foreach (var control in _hiddenMain) control.Visible = false;
+    }
+
+    /// <summary>Закрывает верхнюю страницу: снова видна предыдущая страница или основное содержимое.</summary>
+    void ClosePage()
+    {
+        if (!_pages.TryPop(out var page)) return;
+        SuspendLayout();
+        Controls.Remove(page);
+        if (_pages.TryPeek(out var top)) top.Visible = true;
+        else
+        {
+            foreach (var control in _hiddenMain.Where(c => !c.IsDisposed)) control.Visible = true;
+            _hiddenMain.Clear();
+        }
+        ResumeLayout(true);
+        // Страницу закрывают из её же обработчика щелчка — освобождаем после выхода из него.
+        BeginInvoke(page.Dispose);
+    }
+
+    /// <summary>Тема или язык сменились: перечитать ресурсы и перестроить содержимое этого же окна.</summary>
+    void ApplyAppearance()
+    {
+        Notices.Clear();
+        Program.LoadResources(_settings);
+        _settings.Normalize();
+        BuildUi(_pad.Selected);
+        if (IsHandleCreated) Theme.DarkTitleBar(this);
+    }
 
     void ShowSettings()
     {
-        using var form = new SettingsForm(_settings, _device != null ? (_device.VendorId, _device.ProductId) : null);
-        if (form.ShowDialog(this) != DialogResult.OK) return;
-
-        if (form.RerunSetup) _settings.SetupDone = false;
-        if (form.NeedsReopen || form.RerunSetup)
+        if (_tour != null || _pages.Count > 0) return;
+        var page = new SettingsPage(_settings, _device != null ? (_device.VendorId, _device.ProductId) : null);
+        page.Cancelled += (_, _) => ClosePage();
+        page.Done += (_, _) =>
         {
+            ClosePage();
+            if (page.DriverChanged) AfterDriverChanged();
+            if (page.AppearanceChanged) ApplyAppearance();
+            RefreshDevice();
             SaveNow();
-            RequestReopen();
-            return;
-        }
-        if (form.DriverChanged) AfterDriverChanged();
-        RefreshDevice();
-        SaveNow();
-        if (form.ShowTour) BeginInvoke(StartTour);
+            if (page.RerunSetup) BeginInvoke(ShowSetup);
+            else if (page.ShowTour) BeginInvoke(StartTour);
+        };
+        ShowPage(page);
     }
 
     void ShowAbout()
     {
-        using var form = new AboutForm(_settings);
-        form.ShowDialog(this);
+        if (_tour != null || _pages.Count > 0) return;
+        var page = new AboutPage(_settings);
+        page.Closed += (_, _) => ClosePage();
+        ShowPage(page);
     }
 
-    void RerunSetup()
+    /// <summary>Мастер первого запуска (язык, тема, плата) — страницей в окне; язык и тема применяются сразу.</summary>
+    void ShowSetup()
     {
+        if (!_interactive || _tour != null || _pages.Count > 0) return;
         _settings.SetupDone = false;
         SaveNow();
-        RequestReopen();
+        var page = new SetupPage(_settings);
+        page.AppearanceChanged += (_, _) =>
+        {
+            // Мастер перерисуется сам; окну остаётся сменить фон и цвет заголовка.
+            BackColor = Theme.Window;
+            Theme.DarkTitleBar(this);
+            ScheduleSave();
+        };
+        page.WriteCheckRequested += (_, _) => ShowWizard(page);
+        page.Finished += (_, _) =>
+        {
+            ClosePage();
+            _layer = 0;
+            ApplyAppearance();
+            SaveNow();
+            BeginInvoke(StartTour);
+        };
+        ShowPage(page);
     }
 
     /// <summary>Тур по окну: подсвечивает области и объясняет, что они делают.</summary>
@@ -941,7 +1135,7 @@ internal sealed class MainForm : Form
 
     void StartTour(bool force)
     {
-        if (_tour != null || !Visible || (!_interactive && !force)) return;
+        if (_tour != null || _pages.Count > 0 || !Visible || (!_interactive && !force)) return;
         Rectangle Of(Control control, Rectangle? inner = null)
         {
             var rect = inner ?? new Rectangle(Point.Empty, control.Size);

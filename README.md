@@ -128,4 +128,4 @@ dotnet publish MacroPadStudio -c Release -r win-x64 --self-contained false -p:Pu
 
 ## Благодарности
 
-Протоколы восстановлены по открытым проектам [kriomant/ch57x-keyboard-tool](https://github.com/kriomant/ch57x-keyboard-tool), [barkleesanders/padclaude](https://github.com/barkleesanders/padclaude) и [rOzzy1987/MacroPad](https://github.com/rOzzy1987/MacroPad).
+Протоколы восстановлены по открытым проектам [kriomant/ch57x-keyboard-tool](https://github.com/kriomant/ch57x-keyboard-tool) и [rOzzy1987/MacroPad](https://github.com/rOzzy1987/MacroPad).

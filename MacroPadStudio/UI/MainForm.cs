@@ -766,7 +766,7 @@ internal sealed class MainForm : Form
     void ShowAbout() => MessageBox.Show(this,
         $"{AppName} {Branding.Version}\n\nНастройка макро-клавиатур на чипе CH552 (USB ID 1189:8890): 6 клавиш и ручка.\n\n" +
         $"Способ записи сейчас: {ProtocolTitle(_settings.EffectiveProtocol)}.\n" +
-        "Протоколы: kriomant/ch57x-keyboard-tool и barkleesanders/padclaude.\n\n" +
+        "Протоколы: kriomant/ch57x-keyboard-tool и rOzzy1987/MacroPad.\n\n" +
         "Настройки хранятся в: " + SettingsStore.FilePath,
         "О программе", MessageBoxButtons.OK, MessageBoxIcon.Information);
 

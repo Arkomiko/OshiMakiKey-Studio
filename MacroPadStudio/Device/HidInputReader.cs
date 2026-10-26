@@ -30,7 +30,7 @@ public sealed class HidInputReader : IDisposable
         {
             int error = Marshal.GetLastWin32Error();
             _handle.Dispose();
-            throw new IOException($"Не удалось открыть интерфейс (код {error}).");
+            throw new IOException(Model.L.F("device.interfaceError", "Не удалось открыть интерфейс (код {0}).", error));
         }
         _thread = new Thread(ReadLoop) { IsBackground = true, Name = "HidInputReader" };
     }

@@ -21,7 +21,7 @@ public static class DirectProtocol
     public static byte[] Bind(byte slot, byte modifiers, IReadOnlyList<byte> keys)
     {
         if (keys.Count > MaxKeysInReport)
-            throw new ArgumentException($"Не больше {MaxKeysInReport} клавиш одновременно.", nameof(keys));
+            throw new ArgumentException(L.F("protocol.tooManyKeys", "Не больше {0} клавиш одновременно.", MaxKeysInReport), nameof(keys));
 
         var packet = Packet(slot, modifiers, 0x00);
         for (int i = 0; i < keys.Count; i++) packet[3 + i] = keys[i];

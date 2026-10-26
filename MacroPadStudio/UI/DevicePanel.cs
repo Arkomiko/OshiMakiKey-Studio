@@ -82,7 +82,8 @@ internal sealed class DevicePanel : Control
 
         _listTitleY = _pad.Bottom + 24 * s;
         float y = _listTitleY + 28 * s;
-        float rowHeight = Math.Clamp((ClientSize.Height - y - 10 * s) / Order.Length, 30 * s, 46 * s);
+        // Мало места (низкое окно, уведомления сверху) — строки ужимаются до однострочных.
+        float rowHeight = Math.Clamp((ClientSize.Height - y - 10 * s) / Order.Length, 24 * s, 46 * s);
         foreach (var id in Order)
         {
             _rows[id] = new RectangleF(margin, y, width, rowHeight - 4 * s);
@@ -113,8 +114,8 @@ internal sealed class DevicePanel : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         float s = Theme.Scale;
 
-        TextRenderer.DrawText(g, "Ваше устройство", Theme.Subtitle, new Point((int)_pad.X, (int)(20 * s)), Theme.Text, TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(g, "щёлкните по клавише или ручке", Theme.Small,
+        TextRenderer.DrawText(g, L.T("pad.title", "Ваше устройство"), Theme.Subtitle, new Point((int)_pad.X, (int)(20 * s)), Theme.Text, TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(g, L.T("pad.hint", "щёлкните по клавише или ручке"), Theme.Small,
             Rectangle.Round(new RectangleF(_pad.X, 20 * s, _pad.Width, 24 * s)), Theme.Muted,
             TextFormatFlags.Right | TextFormatFlags.VerticalCenter | SingleLine);
 
@@ -124,7 +125,7 @@ internal sealed class DevicePanel : Control
             using (var brush = new SolidBrush(Color.FromArgb(40, 0, 0, 0)))
                 g.FillPath(brush, shadow);
             using (var body = Theme.Rounded(_pad, 16 * s))
-            using (var brush = new LinearGradientBrush(_pad, Color.FromArgb(56, 61, 71), Color.FromArgb(31, 34, 40), 90f))
+            using (var brush = new LinearGradientBrush(_pad, Theme.PadTop, Theme.PadBottom, 90f))
                 g.FillPath(brush, body);
         }
 
@@ -135,7 +136,7 @@ internal sealed class DevicePanel : Control
         }
         DrawKnob(g);
 
-        TextRenderer.DrawText(g, "Все кнопки и ручка", Theme.Subtitle, new Point((int)_pad.X, (int)_listTitleY), Theme.Text, TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(g, L.T("pad.list", "Все кнопки и ручка"), Theme.Subtitle, new Point((int)_pad.X, (int)_listTitleY), Theme.Text, TextFormatFlags.NoPrefix);
         foreach (var id in Order) DrawRow(g, id, _rows[id]);
 
         if (Focused) ControlPaint.DrawFocusRectangle(g, Rectangle.Round(RectangleF.Inflate(_rows[_selected], -1, -1)));
@@ -151,21 +152,21 @@ internal sealed class DevicePanel : Control
             g.FillPath(brush, shadow);
 
         using var cap = Theme.Rounded(rect, 9 * s);
-        var top = selected ? Color.FromArgb(239, 246, 255) : hover ? Color.White : Color.FromArgb(243, 244, 247);
-        var bottom = selected ? Color.FromArgb(207, 225, 253) : Color.FromArgb(211, 214, 221);
+        var top = selected ? Theme.KeySelectedTop : hover ? Theme.KeyHover : Theme.KeyTop;
+        var bottom = selected ? Theme.KeySelectedBottom : Theme.KeyBottom;
         using (var brush = new LinearGradientBrush(rect, top, bottom, 90f)) g.FillPath(brush, cap);
         if (selected)
             using (var pen = new Pen(Theme.Accent, 3 * s)) g.DrawPath(pen, cap);
 
         var numberRect = new RectangleF(rect.X, rect.Y + 2 * s, rect.Width, rect.Height * 0.58f);
         TextRenderer.DrawText(g, number.ToString(), Theme.KeyNumber, Rectangle.Round(numberRect),
-            selected ? Theme.AccentDark : Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.Bottom | TextFormatFlags.SingleLine);
+            selected ? Theme.KeySelectedText : Theme.KeyText, TextFormatFlags.HorizontalCenter | TextFormatFlags.Bottom | TextFormatFlags.SingleLine);
 
         var action = ActionProvider?.Invoke(id);
         string label = action == null ? "" : BindingText.Compact(action);
         var labelRect = new RectangleF(rect.X + 4 * s, rect.Y + rect.Height * 0.6f, rect.Width - 8 * s, rect.Height * 0.34f);
         TextRenderer.DrawText(g, label, Theme.Tiny, Rectangle.Round(labelRect),
-            selected ? Theme.AccentDark : Theme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | SingleLine);
+            selected ? Theme.KeySelectedText : Theme.KeyMuted, TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | SingleLine);
 
         if (action != null && NeedsAgent?.Invoke(action) == true)
         {
@@ -185,11 +186,11 @@ internal sealed class DevicePanel : Control
 
         using (var brush = new SolidBrush(Color.FromArgb(90, 0, 0, 0)))
             g.FillEllipse(brush, rect.X, rect.Y + 3 * s, rect.Width, rect.Height);
-        using (var brush = new LinearGradientBrush(rect, Color.FromArgb(112, 118, 129), Color.FromArgb(52, 56, 64), 90f))
+        using (var brush = new LinearGradientBrush(rect, Theme.KnobTop, Theme.KnobBottom, 90f))
             g.FillEllipse(brush, rect);
 
         // Насечки по краю ручки.
-        using (var tick = new Pen(Color.FromArgb(55, 255, 255, 255), 1.2f * s))
+        using (var tick = new Pen(Color.FromArgb(55, Theme.KnobGlyph), 1.2f * s))
         {
             for (int i = 0; i < 40; i++)
             {
@@ -210,10 +211,10 @@ internal sealed class DevicePanel : Control
         bool selected = _selected == ControlId.KnobPress, hover = _hover == ControlId.KnobPress;
         float capRadius = radius * 0.45f;
         var capRect = new RectangleF(center.X - capRadius, center.Y - capRadius, capRadius * 2, capRadius * 2);
-        var top = selected ? Color.FromArgb(96, 165, 250) : hover ? Color.FromArgb(98, 104, 116) : Color.FromArgb(80, 85, 96);
-        var bottom = selected ? Theme.Accent : Color.FromArgb(42, 46, 53);
+        var top = selected ? Theme.KnobGlow : hover ? Theme.KnobCapHover : Theme.KnobCap;
+        var bottom = selected ? Theme.Accent : Theme.KnobCapBottom;
         using (var brush = new LinearGradientBrush(capRect, top, bottom, 90f)) g.FillEllipse(brush, capRect);
-        using (var pen = new Pen(selected ? Color.White : Color.FromArgb(70, 0, 0, 0), (selected ? 2.5f : 1f) * s))
+        using (var pen = new Pen(selected ? Theme.OnAccent : Color.FromArgb(70, 0, 0, 0), (selected ? 2.5f : 1f) * s))
             g.DrawEllipse(pen, capRect);
     }
 
@@ -223,7 +224,7 @@ internal sealed class DevicePanel : Control
         if (!selected && !hover) return;
         float s = Theme.Scale;
         var arcRect = RectangleF.Inflate(_knob, -4 * s, -4 * s);
-        using var pen = new Pen(selected ? Color.FromArgb(96, 165, 250) : Color.FromArgb(140, 147, 197, 253), 7 * s)
+        using var pen = new Pen(selected ? Theme.KnobGlow : Color.FromArgb(140, Theme.KnobGlow), 7 * s)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -233,7 +234,7 @@ internal sealed class DevicePanel : Control
 
     void DrawGlyph(Graphics g, string glyph, RectangleF rect, ControlId id)
     {
-        var color = _selected == id ? Color.White : _hover == id ? Color.FromArgb(230, 255, 255, 255) : Color.FromArgb(170, 255, 255, 255);
+        var color = _selected == id ? Theme.KnobGlyph : Color.FromArgb(_hover == id ? 230 : 170, Theme.KnobGlyph);
         TextRenderer.DrawText(g, glyph, Theme.Symbol, Rectangle.Round(RectangleF.Inflate(rect, 6, 6)), color,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
     }
@@ -258,10 +259,10 @@ internal sealed class DevicePanel : Control
 
         float badgeSize = Math.Min(28 * s, rect.Height - 6 * s);
         var badge = new RectangleF(rect.X + 14 * s, rect.Y + (rect.Height - badgeSize) / 2, badgeSize, badgeSize);
-        using (var brush = new SolidBrush(selected ? Theme.Accent : Color.FromArgb(229, 231, 235)))
+        using (var brush = new SolidBrush(selected ? Theme.Accent : Theme.Badge))
             g.FillEllipse(brush, badge);
         TextRenderer.DrawText(g, UiText.Glyph(id), UiText.IsKey(id) ? Theme.Strong : Theme.SymbolSmall, Rectangle.Round(badge),
-            selected ? Color.White : Theme.Text,
+            selected ? Theme.OnAccent : Theme.BadgeText,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
 
         float textX = badge.Right + 12 * s;

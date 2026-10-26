@@ -1,0 +1,12 @@
+{
+  "id": "mini-keyboard-v0",
+  "name": { "ru": "Mini Keyboard · формат официальной программы", "en": "Mini Keyboard · official software format" },
+  "vendorId": "1189",
+  "productId": "8890",
+  "consumerBitfield": null,
+  "autoDetect": false,
+  "protocol": "Vendor",
+  "keySlots": [1, 2, 3, 4, 5, 6],
+  "knobSlots": [13, 14, 15],
+  "notes": "«Версия 0» официальной программы для плат без Report ID (по коду rOzzy1987/MacroPad). Только вручную."
+}

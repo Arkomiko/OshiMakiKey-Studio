@@ -1,0 +1,12 @@
+{
+  "id": "ch57x-k8890",
+  "name": { "ru": "CH57x · формат ch57x-keyboard-tool", "en": "CH57x · ch57x-keyboard-tool format" },
+  "vendorId": "1189",
+  "productId": "8890",
+  "consumerBitfield": false,
+  "autoDetect": true,
+  "protocol": "Legacy",
+  "keySlots": [1, 2, 3, 4, 5, 6],
+  "knobSlots": [13, 14, 15],
+  "notes": "Формат k8890 из kriomant/ch57x-keyboard-tool: прошивка сама разбирает клавиши, мультимедиа и мышь, есть слои."
+}

@@ -1,7 +1,10 @@
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OshiMakiKey.Device;
 using OshiMakiKey.Model;
+using OshiMakiKey.UI;
 
 namespace OshiMakiKey;
 
@@ -89,7 +92,7 @@ internal static class SelfTest
             "04 00 00 68", "05 00 00 69", "06 00 00 6a",
             "0b 00 00 6b", "0c 00 00 6c", "0d 00 00 6d",
             "aa aa");
-        direct.KnobSlots = new List<int> { 16, 17, 15 };
+        direct.LearnedKnobSlots = new() { [direct.EffectiveDriver.Id] = new List<int> { 16, 17, 15 } };
         Check("Прямой: найденные номера ручки используются при записи",
             ProfileCompiler.Compile(direct)[6][0] == 16 && ProfileCompiler.Compile(direct)[7][0] == 17 && ProfileCompiler.Compile(direct)[8][0] == 15);
         Check("Прямой: без пустого кадра в начале", !ProfileCompiler.SendsInitPacket(ProtocolMode.Direct));
@@ -99,7 +102,15 @@ internal static class SelfTest
             Execution.NeedsAgent(PadAction.FromKeys(KeyChord.Of(KeyCatalog.C, ctrl: true), KeyChord.Of(KeyCatalog.V, ctrl: true)), ProtocolMode.Direct));
         Check("Прямой: мультимедиа — через агента", Execution.NeedsAgent(PadAction.FromMedia(MediaCatalog.VolumeUp), ProtocolMode.Direct));
         Check("ch57x: мультимедиа — само устройство", !Execution.NeedsAgent(PadAction.FromMedia(MediaCatalog.VolumeUp), ProtocolMode.Legacy));
-        Check("Прямой: слоёв всегда один", new AppSettings { Protocol = ProtocolMode.Direct, LayerCount = 3 }.EffectiveLayerCount == 1);
+        var layered = new AppSettings { Protocol = ProtocolMode.Direct, LayerCount = 3 };
+        layered.Normalize();
+        Check("Прямой: слоёв всегда один", layered.EffectiveLayerCount == 1);
+        var migrated = new AppSettings { Protocol = ProtocolMode.Legacy, DetectedProtocol = ProtocolMode.Direct, KnobSlots = new List<int> { 7, 8, 9 } };
+        migrated.Normalize();
+        Check("Перенос: способ записи прежней версии → драйвер", migrated.DriverId == "ch57x-k8890" && migrated.DetectedDriverId == "ch552-6keys-knob",
+            $"{migrated.DriverId} / {migrated.DetectedDriverId}");
+        Check("Перенос: номера ручки → драйвер прямого формата",
+            migrated.LearnedKnobSlots?.GetValueOrDefault("ch552-6keys-knob") is [7, 8, 9] && migrated.KnobSlots == null);
 
         // Формат официальной программы («версия 0»): без префикса 0x03, запись во флеш после каждой кнопки.
         Packets("Офиц.: Ctrl+C на клавише 1", VendorProtocol.Bind(ControlId.Key1, new KeysAction(new[] { ((byte)0x01, KeyCatalog.C) })),
@@ -122,12 +133,16 @@ internal static class SelfTest
         settings.EnsureTriggers();
         string json = JsonSerializer.Serialize(settings, SettingsStore.Json);
         var restored = JsonSerializer.Deserialize<AppSettings>(json, SettingsStore.Json)!;
+        restored.Profile = JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(settings.Profile, SettingsStore.Json), SettingsStore.Json)!;
         restored.Normalize();
+        Check("JSON: раскладка не попадает в settings.json", !json.Contains("\"Layers\""));
         Check("JSON: конфигурация совпадает после сохранения",
             ProfileCompiler.Signature(ProfileCompiler.Compile(settings)) == ProfileCompiler.Signature(ProfileCompiler.Compile(restored)));
         int controls = Enum.GetValues<ControlId>().Length;
         int compiled = ProfileCompiler.Compile(settings).Count;
         Check($"ch57x: пример профиля — {controls} действий × 3–4 пакета", compiled >= 3 * controls && compiled <= 4 * controls, compiled.ToString());
+
+        ResourceChecks(Check);
 
         log.AppendLine();
         log.AppendLine(failures == 0 ? "ALL PASSED" : $"{failures} FAILED");
@@ -142,7 +157,7 @@ internal static class SelfTest
         foreach (var (vid, pid) in MacroPadDevice.Supported)
             foreach (var d in HidEnumerator.Enumerate(vid, pid))
                 log.AppendLine($"{d.VendorId:X4}:{d.ProductId:X4} page=0x{d.UsagePage:X4} usage=0x{d.Usage:X4} in={d.InputReportLength} out={d.OutputReportLength} valueCaps={d.InputValueCaps}  {d.Path}");
-        log.AppendLine("Определённый способ записи: " + (MacroPadDevice.DetectProtocol()?.ToString() ?? "—"));
+        log.AppendLine("Подобранный драйвер: " + (MacroPadDevice.DetectDriver()?.Id ?? "—"));
 
         var info = MacroPadDevice.FindConfigInterface();
         if (info == null)
@@ -167,6 +182,142 @@ internal static class SelfTest
         }
         File.WriteAllText(reportPath, log.ToString());
         return code;
+    }
+
+    /// <summary>Файлы ресурсов рядом с программой, работа без них, пресеты.</summary>
+    static void ResourceChecks(Action<string, bool, string> check)
+    {
+        void Check(string name, bool ok, string details = "") => check(name, ok, details);
+
+        // Драйверы: в папке те же описания, что встроены в программу.
+        Notices.Clear();
+        DriverStore.Load();
+        var builtIns = DriverStore.BuiltIns();
+        Check("drivers: все встроенные драйверы лежат в папке",
+            builtIns.All(b => DriverStore.Find(b.Id) is { } d && DriverStore.Serialize(d) == DriverStore.Serialize(b)),
+            string.Join(", ", DriverStore.All.Select(d => d.Id)));
+        Check("drivers: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
+
+        // Темы: 12 штук, у каждой полный и правильный набор цветов.
+        Notices.Clear();
+        ThemeStore.Load();
+        var colorKeys = typeof(Theme).GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(p => p.PropertyType == typeof(Color))
+            .Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name[1..])
+            .ToHashSet();
+        Check("theme: 12 тем", ThemeStore.All.Count == 12, string.Join(", ", ThemeStore.All.Select(t => t.Id)));
+        Check("theme: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
+        foreach (var theme in ThemeStore.All)
+        {
+            var keys = theme.Colors.Keys.ToHashSet();
+            Check($"theme/{theme.Id}: все цвета заданы и известны", keys.SetEquals(colorKeys),
+                "лишние: " + string.Join(",", keys.Except(colorKeys)) + "; нет: " + string.Join(",", colorKeys.Except(keys)));
+            Check($"theme/{theme.Id}: названия ru и en", theme.Name.ContainsKey("ru") && theme.Name.ContainsKey("en"));
+        }
+        ThemeStore.Apply("нет-такой-темы");
+        Check("theme: неизвестная тема → светлая и уведомление",
+            ThemeStore.Current.Id == ThemeStore.DefaultId && Notices.All.Any(n => n.Text.Contains("нет-такой-темы")));
+
+        // Языки: в английском те же ключи и те же {0}, {1}…, что в русском.
+        var packs = AppPaths.JsonFiles(AppPaths.Languages).ToDictionary(f => Path.GetFileNameWithoutExtension(f), ReadStrings);
+        Check("language: есть ru и en", packs.ContainsKey("ru") && packs.ContainsKey("en"), string.Join(", ", packs.Keys));
+        if (packs.TryGetValue("ru", out var ru) && packs.TryGetValue("en", out var en))
+        {
+            Check("language: в en все ключи ru", ru.Keys.All(en.ContainsKey), string.Join(", ", ru.Keys.Where(k => !en.ContainsKey(k)).Take(10)));
+            Check("language: в en нет лишних ключей", en.Keys.All(ru.ContainsKey), string.Join(", ", en.Keys.Where(k => !ru.ContainsKey(k)).Take(10)));
+            // Перевод может не использовать какую-то подстановку, но не должен ссылаться на несуществующую.
+            var placeholders = new Regex(@"\{(\d+)[^}]*\}");
+            HashSet<string> Slots(string text) => placeholders.Matches(text).Select(m => m.Groups[1].Value).ToHashSet();
+            var mismatched = ru.Keys.Where(k => en.TryGetValue(k, out var t) && !Slots(t).IsSubsetOf(Slots(ru[k]))).ToList();
+            Check("language: в en нет лишних подстановок {n}", mismatched.Count == 0, string.Join(", ", mismatched.Take(10)));
+        }
+
+        // Без папок ресурсов: встроенные настройки и уведомление.
+        string realRoot = AppPaths.Root;
+        string temp = Path.Combine(Path.GetTempPath(), "OshiMakiKeySelfTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            static string Missing(string what) =>
+                $"Отсутствуют файлы {what}, в данный момент применяются стандартные встроенные настройки программы. Рекомендуется проверить программу на наличие обновлений.";
+            string Texts() => string.Join(" | ", Notices.All.Select(n => n.Text));
+
+            // Удалены только темы (языки и драйверы на месте; русский пакет — чтобы текст был на русском).
+            AppPaths.Root = temp;
+            Directory.CreateDirectory(AppPaths.Languages);
+            File.Copy(Path.Combine(realRoot, "language", "ru.json"), Path.Combine(AppPaths.Languages, "ru.json"));
+            Directory.CreateDirectory(AppPaths.Drivers);
+            foreach (var file in AppPaths.JsonFiles(Path.Combine(realRoot, "drivers")))
+                File.Copy(file, Path.Combine(AppPaths.Drivers, Path.GetFileName(file)));
+            Notices.Clear();
+            L.Load("ru");
+            DriverStore.Load();
+            ThemeStore.Load();
+            ThemeStore.Apply("dark");
+            Check("Нет тем: одно уведомление «тем»", Notices.All.Count == 1 && Notices.All[0].Text == Missing("тем") && Notices.All[0].SuggestUpdate, Texts());
+            Check("Нет тем: тема встроенная (светлая)", ThemeStore.Current.Id == "" && !Theme.Dark && Theme.Surface.ToArgb() == Color.White.ToArgb());
+
+            // Удалено всё: встроенные драйверы, язык и тема, одно общее уведомление.
+            Directory.Delete(AppPaths.Languages, recursive: true);
+            Directory.Delete(AppPaths.Drivers, recursive: true);
+            Notices.Clear();
+            L.Load(null);
+            DriverStore.Load();
+            ThemeStore.Load();
+            ThemeStore.Apply(null);
+            Check("Без файлов: драйверы встроенные", DriverStore.All.Count == builtIns.Count);
+            Check("Без файлов: русский встроенный", L.Code == L.BuiltInCode && L.T("menu.file", "Файл") == "Файл");
+            Check("Без файлов: одно уведомление «языковых пакетов, драйверов и тем»",
+                Notices.All.Count == 1 && Notices.All[0].Text == Missing("языковых пакетов, драйверов и тем"), Texts());
+
+            // Языковой пакет переопределяет текст, а ошибка в переводе не роняет программу.
+            Directory.CreateDirectory(AppPaths.Languages);
+            File.WriteAllText(Path.Combine(AppPaths.Languages, "xx.json"),
+                "{\"code\": \"xx\", \"name\": \"Test\", \"strings\": {\"menu.file\": \"File!\", \"broken\": \"oops {3}\"}}");
+            L.Load("xx");
+            Check("Язык: перевод из файла", L.Code == "xx" && L.T("menu.file", "Файл") == "File!");
+            Check("Язык: битая подстановка → встроенный текст", L.F("broken", "ok {0}", 1) == "ok 1");
+            L.Load("zz");
+            Check("Язык: нет выбранного → уведомление", Notices.All.Any(n => n.Text.Contains("zz")));
+            L.Load(null);
+
+            // Пресеты: перенос раскладки из settings.json старой версии, уникальные имена, переименование.
+            var legacy = Profile.CreateDefault();
+            legacy.Name = "Мой: пресет";
+            legacy.Layers[0].Actions[ControlId.Key1] = PadAction.FromMedia(MediaCatalog.Mute);
+            var old = new AppSettings { LegacyProfile = legacy };
+            SettingsStore.AttachPresets(old);
+            Check("Пресеты: старая раскладка перенесена в пресет",
+                old.ActivePreset == "Мой_ пресет" && PresetStore.Names().SequenceEqual(new[] { "Мой_ пресет" }) &&
+                old.Profile.Layers[0].Get(ControlId.Key1).MediaCode == MediaCatalog.Mute && old.LegacyProfile == null,
+                string.Join(", ", PresetStore.Names()));
+            Check("Пресеты: свободное имя", PresetStore.Unique("Мой_ пресет") == "Мой_ пресет (2)");
+            SettingsStore.Save(old);
+            Check("Пресеты: settings.json без раскладки", !File.ReadAllText(SettingsStore.FilePath).Contains("\"Layers\""));
+            PresetStore.Rename("Мой_ пресет", "Игры");
+            Check("Пресеты: переименование", PresetStore.Names().SequenceEqual(new[] { "Игры" }) &&
+                                              PresetStore.Load("Игры").Layers[0].Get(ControlId.Key1).MediaCode == MediaCatalog.Mute);
+            var fresh = SettingsStore.LoadSettings();
+            fresh.ActivePreset = "удалённый";
+            SettingsStore.AttachPresets(fresh);
+            Check("Пресеты: пропавший активный пресет → первый из папки", fresh.ActivePreset == "Игры");
+        }
+        finally
+        {
+            AppPaths.Root = realRoot;
+            Notices.Clear();
+            L.Load(null);
+            DriverStore.Load();
+            ThemeStore.Load();
+            ThemeStore.Apply(null);
+            try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    static Dictionary<string, string> ReadStrings(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.GetProperty("strings").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? "");
     }
 
     static string Hex(byte[] packet)

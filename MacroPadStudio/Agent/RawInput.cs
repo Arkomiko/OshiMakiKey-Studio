@@ -92,7 +92,7 @@ internal static class RawInput
         var devices = Collections.Select(c => new RAWINPUTDEVICE { UsagePage = c.Page, Usage = c.Usage, Flags = flags, Target = window }).ToArray();
         return RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>())
             ? null
-            : $"RegisterRawInputDevices: код ошибки {Marshal.GetLastWin32Error()}";
+            : Model.L.F("rawinput.error", "RegisterRawInputDevices: код ошибки {0}", Marshal.GetLastWin32Error());
     }
 
     public static string DeviceName(IntPtr device)

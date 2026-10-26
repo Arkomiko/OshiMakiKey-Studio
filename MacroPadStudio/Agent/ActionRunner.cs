@@ -36,7 +36,7 @@ internal static class ActionRunner
         {
             case SystemActionKind.RunProgram:
             {
-                string path = Required(action.Target, "Не выбрана программа для запуска.");
+                string path = Required(action.Target, L.T("run.noProgram", "Не выбрана программа для запуска."));
                 var info = new ProcessStartInfo(path)
                 {
                     UseShellExecute = true,
@@ -48,10 +48,10 @@ internal static class ActionRunner
                 break;
             }
             case SystemActionKind.OpenUrl:
-                Start(new ProcessStartInfo(NormalizeUrl(Required(action.Target, "Не указан адрес сайта."))) { UseShellExecute = true });
+                Start(new ProcessStartInfo(NormalizeUrl(Required(action.Target, L.T("run.noUrl", "Не указан адрес сайта.")))) { UseShellExecute = true });
                 break;
             case SystemActionKind.OpenPath:
-                Start(new ProcessStartInfo(Required(action.Target, "Не указан файл или папка.")) { UseShellExecute = true });
+                Start(new ProcessStartInfo(Required(action.Target, L.T("run.noPath", "Не указан файл или папка."))) { UseShellExecute = true });
                 break;
             case SystemActionKind.TypeText:
                 if (action.Text.Length == 0) return;
@@ -61,7 +61,7 @@ internal static class ActionRunner
             case SystemActionKind.RunCommand:
             {
                 string command = action.Target.Trim();
-                if (command.Length == 0) throw new InvalidOperationException("Не указана команда.");
+                if (command.Length == 0) throw new InvalidOperationException(L.T("run.noCommand", "Не указана команда."));
                 Start(new ProcessStartInfo("cmd.exe", "/c " + command)
                 {
                     UseShellExecute = false,
@@ -83,10 +83,10 @@ internal static class ActionRunner
                 Application.SetSuspendState(PowerState.Suspend, false, false);
                 break;
             case SystemActionKind.Shutdown:
-                if (Confirm("Выключить компьютер?")) RunShutdown("/s /t 0");
+                if (Confirm(L.T("run.confirmShutdown", "Выключить компьютер?"))) RunShutdown("/s /t 0");
                 break;
             case SystemActionKind.Restart:
-                if (Confirm("Перезагрузить компьютер?")) RunShutdown("/r /t 0");
+                if (Confirm(L.T("run.confirmRestart", "Перезагрузить компьютер?"))) RunShutdown("/r /t 0");
                 break;
         }
     }
@@ -287,7 +287,7 @@ internal static class MediaSender
             return;
         }
         if (!VirtualKeys.TryGetValue(code, out var key))
-            throw new InvalidOperationException($"Мультимедийная клавиша 0x{code:X3} не поддерживается.");
+            throw new InvalidOperationException(L.F("run.mediaUnsupported", "Мультимедийная клавиша 0x{0:X3} не поддерживается.", code));
         InputSender.TapKey(key);
     }
 
@@ -297,7 +297,7 @@ internal static class MediaSender
         try
         {
             var locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator")
-                ?? throw new InvalidOperationException("WMI недоступен.");
+                ?? throw new InvalidOperationException(L.T("run.noWmi", "WMI недоступен."));
             dynamic locator = Activator.CreateInstance(locatorType)!;
             dynamic service = locator.ConnectServer(".", @"root\WMI");
             dynamic levels = service.ExecQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active=TRUE");
@@ -309,7 +309,7 @@ internal static class MediaSender
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            throw new InvalidOperationException("Не удалось изменить яркость: Windows позволяет это только для встроенного экрана ноутбука.", ex);
+            throw new InvalidOperationException(L.T("run.brightness", "Не удалось изменить яркость: Windows позволяет это только для встроенного экрана ноутбука."), ex);
         }
     }
 }

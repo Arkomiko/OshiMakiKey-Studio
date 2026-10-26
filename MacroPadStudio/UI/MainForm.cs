@@ -1,11 +1,16 @@
+using System.Diagnostics;
 using System.Drawing.Imaging;
+using System.Text.Json;
 using OshiMakiKey.Agent;
 using OshiMakiKey.Device;
 using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
 
-/// <summary>Главное окно: схема устройства, редактор действия, запись в устройство, значок в трее и фоновый агент.</summary>
+/// <summary>Что перенести в пересозданное окно (после смены темы или языка): положение, выбранную кнопку и слой.</summary>
+internal sealed record ReopenState(Rectangle Bounds, FormWindowState State, ControlId Selected, int Layer);
+
+/// <summary>Главное окно: схема устройства, редактор действия, пресеты, запись в устройство, значок в трее и фоновый агент.</summary>
 internal sealed class MainForm : Form
 {
     const string AppName = Branding.AppName;
@@ -18,6 +23,7 @@ internal sealed class MainForm : Form
     bool _exiting;
     bool _writing;
     bool _suppressLayerEvent;
+    bool _suppressPresetEvent;
     int _layer;
     HidDeviceInfo? _device;
     HashSet<int> _registeredSlots = new();
@@ -27,25 +33,35 @@ internal sealed class MainForm : Form
 
     readonly DevicePanel _pad = new();
     readonly BindingEditor _editor = new();
+    readonly NoticeBar _notices = new();
     readonly StatusDot _deviceDot = new();
     readonly Label _deviceText = new();
     readonly Label _dirtyLabel = new();
+    readonly Label _presetLabel = new();
+    readonly ThemedComboBox _presetBox = new();
     readonly Label _layerLabel = new();
-    readonly ComboBox _layerBox = new();
+    readonly ThemedComboBox _layerBox = new();
     readonly Button _writeButton = new();
     readonly ToolStripStatusLabel _status = new();
+    readonly ToolStripStatusLabel _driverStatus = new();
     readonly ToolStripStatusLabel _agentStatus = new();
     readonly NotifyIcon _tray = new();
     readonly HotkeyAgent? _agent;
     readonly System.Windows.Forms.Timer _deviceTimer = new() { Interval = 400 };
     readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 700 };
-    readonly ToolStripMenuItem _autostartItem = new("Запускать вместе с Windows");
-    readonly ToolStripMenuItem _trayItem = new("Сворачивать в трей при закрытии");
-    readonly ToolStripMenuItem _layersMenu = new("Количество слоёв");
+    readonly ToolStripMenuItem _autostartItem = new(L.T("menu.autostart", "Запускать вместе с Windows"));
+    readonly ToolStripMenuItem _trayItem = new(L.T("menu.minimizeToTray", "Сворачивать в трей при закрытии"));
+    readonly ToolStripMenuItem _layersMenu = new(L.T("menu.layers", "Количество слоёв"));
+    readonly ToolStripMenuItem _deletePresetItem = new(L.T("menu.preset.delete", "Удалить пресет"));
     readonly List<ToolStripMenuItem> _layerItems = new();
-    readonly Dictionary<ProtocolMode, ToolStripMenuItem> _protocolItems = new();
+    readonly Dictionary<string, ToolStripMenuItem> _driverItems = new();
+    readonly ToolStripMenuItem _autoDriverItem = new();
 
-    public MainForm(AppSettings settings, bool startHidden, EventWaitHandle? showEvent, string? snapshotPath = null, ControlId? select = null)
+    /// <summary>Не null — окно закрыто, чтобы открыться заново с новой темой, языком или файлами ресурсов.</summary>
+    public ReopenState? Reopen { get; private set; }
+
+    public MainForm(AppSettings settings, bool startHidden, EventWaitHandle? showEvent, string? snapshotPath = null,
+        ControlId? select = null, ReopenState? reopen = null)
     {
         _settings = settings;
         _showEvent = showEvent;
@@ -62,14 +78,24 @@ internal sealed class MainForm : Form
         var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
         ClientSize = new Size(Math.Min(Theme.S(1180), workArea.Width - 40), Math.Min(Theme.S(760), workArea.Height - 60));
         MinimumSize = new Size(Math.Min(Theme.S(1060), workArea.Width), Math.Min(Theme.S(700), workArea.Height));
+        if (reopen != null)
+        {
+            StartPosition = FormStartPosition.Manual;
+            Bounds = reopen.Bounds;
+            if (reopen.State == FormWindowState.Maximized) WindowState = FormWindowState.Maximized;
+            _layer = reopen.Layer;
+            select ??= reopen.Selected;
+        }
 
         var menu = BuildMenu();
         Controls.Add(BuildBody());
+        Controls.Add(_notices);
         Controls.Add(BuildHeader());
         Controls.Add(BuildStatusBar());
         Controls.Add(menu);
         MainMenuStrip = menu;
         BuildTray();
+        Theme.ApplyTo(this);
 
         _pad.ActionProvider = id => CurrentLayer.Get(id);
         _pad.NeedsAgent = _settings.NeedsAgent;
@@ -91,12 +117,13 @@ internal sealed class MainForm : Form
 
         _settings.EnsureTriggers();
         RefreshDevice();
+        RefreshPresets();
         RebuildLayerUi();
-        UpdateProtocolMenu();
+        UpdateDriverMenu();
         SelectControl(select ?? ControlId.Key1);
         UpdateDirty();
         ApplyAgent();
-        SetStatus("Выберите клавишу или действие ручки слева, настройте его справа и нажмите «Записать в устройство».");
+        SetStatus(L.T("status.ready", "Выберите клавишу или действие ручки слева, настройте его справа и нажмите «Записать в устройство»."));
     }
 
     Layer CurrentLayer => _settings.Profile.Layers[_layer];
@@ -107,28 +134,45 @@ internal sealed class MainForm : Form
     {
         var menu = new MenuStrip { BackColor = Theme.Surface, Padding = new Padding(Theme.S(6), Theme.S(2), 0, Theme.S(2)) };
 
-        var file = new ToolStripMenuItem("Файл");
-        file.DropDownItems.Add(new ToolStripMenuItem("Открыть профиль…", null, (_, _) => OpenProfile()) { ShortcutKeys = Keys.Control | Keys.O });
-        file.DropDownItems.Add(new ToolStripMenuItem("Сохранить профиль как…", null, (_, _) => SaveProfileAs()) { ShortcutKeys = Keys.Control | Keys.S });
+        var file = new ToolStripMenuItem(L.T("menu.file", "Файл"));
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.new", "Новый пресет…"), null, (_, _) => NewPreset()) { ShortcutKeys = Keys.Control | Keys.N });
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.saveAs", "Сохранить как новый пресет…"), null, (_, _) => DuplicatePreset())
+            { ShortcutKeys = Keys.Control | Keys.Shift | Keys.S });
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.rename", "Переименовать пресет…"), null, (_, _) => RenamePreset()) { ShortcutKeys = Keys.F2 });
+        _deletePresetItem.Click += (_, _) => DeletePreset();
+        file.DropDownItems.Add(_deletePresetItem);
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(new ToolStripMenuItem("Очистить текущий слой", null, (_, _) => ClearLayer()));
-        file.DropDownItems.Add(new ToolStripMenuItem("Вернуть пример настроек", null, (_, _) => ResetToDefault()));
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.import", "Импорт пресета…"), null, (_, _) => ImportPreset()) { ShortcutKeys = Keys.Control | Keys.O });
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.export", "Экспорт пресета…"), null, (_, _) => ExportPreset()) { ShortcutKeys = Keys.Control | Keys.E });
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.preset.folder", "Открыть папку пресетов"), null, (_, _) => OpenFolder(AppPaths.Presets)));
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(new ToolStripMenuItem("Выход", null, (_, _) => ExitApp()));
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.clearLayer", "Очистить текущий слой"), null, (_, _) => ClearLayer()));
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.reset", "Вернуть пример настроек"), null, (_, _) => ResetToDefault()));
+        file.DropDownItems.Add(new ToolStripSeparator());
+        file.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.exit", "Выход"), null, (_, _) => ExitApp()));
+        file.DropDownOpening += (_, _) => _deletePresetItem.Enabled = PresetStore.Names().Count > 1;
 
-        var device = new ToolStripMenuItem("Устройство");
-        device.DropDownItems.Add(new ToolStripMenuItem("Записать в устройство", null, async (_, _) => await WriteToDeviceAsync()) { ShortcutKeys = Keys.F5 });
-        device.DropDownItems.Add(new ToolStripMenuItem("Монитор нажатий…", null, (_, _) => ShowMonitor()) { ShortcutKeys = Keys.F8 });
-        device.DropDownItems.Add(new ToolStripMenuItem("Обновить состояние", null, (_, _) => RefreshDevice()));
+        var device = new ToolStripMenuItem(L.T("menu.device", "Устройство"));
+        device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.write", "Записать в устройство"), null, async (_, _) => await WriteToDeviceAsync()) { ShortcutKeys = Keys.F5 });
+        device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.monitor", "Монитор нажатий…"), null, (_, _) => ShowMonitor()) { ShortcutKeys = Keys.F8 });
+        device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.wizard", "Проверить запись…"), null, (_, _) => ShowWizard()));
+        device.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.refresh", "Обновить состояние"), null, (_, _) => RefreshDevice()));
         device.DropDownItems.Add(new ToolStripSeparator());
 
-        device.DropDownItems.Add(new ToolStripMenuItem("Проверить запись…", null, (_, _) => ShowWizard()));
-        var protocol = new ToolStripMenuItem("Способ записи");
-        AddProtocolItem(protocol, ProtocolMode.Auto, "Определять автоматически");
-        AddProtocolItem(protocol, ProtocolMode.Direct, "Прямой — CH552 6 клавиш + ручка");
-        AddProtocolItem(protocol, ProtocolMode.Vendor, "Как у официальной программы (без префикса 03)");
-        AddProtocolItem(protocol, ProtocolMode.Legacy, "Совместимый с ch57x-keyboard-tool");
-        device.DropDownItems.Add(protocol);
+        var driver = new ToolStripMenuItem(L.T("menu.driver", "Драйвер"));
+        _autoDriverItem.Click += (_, _) => SetDriver(null);
+        driver.DropDownItems.Add(_autoDriverItem);
+        driver.DropDownItems.Add(new ToolStripSeparator());
+        foreach (var def in DriverStore.All)
+        {
+            string id = def.Id;
+            var item = new ToolStripMenuItem(def.Title, null, (_, _) => SetDriver(id)) { ToolTipText = $"USB {def.Vid:X4}:{def.Pid:X4}" };
+            _driverItems[id] = item;
+            driver.DropDownItems.Add(item);
+        }
+        driver.DropDownItems.Add(new ToolStripSeparator());
+        driver.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.driver.folder", "Открыть папку драйверов"), null, (_, _) => OpenFolder(AppPaths.Drivers)));
+        device.DropDownItems.Add(driver);
 
         for (int n = 1; n <= Profile.MaxLayers; n++)
         {
@@ -139,7 +183,10 @@ internal sealed class MainForm : Form
         }
         device.DropDownItems.Add(_layersMenu);
 
-        var options = new ToolStripMenuItem("Настройки");
+        var options = new ToolStripMenuItem(L.T("menu.settings", "Настройки"));
+        options.DropDownItems.Add(BuildThemeMenu());
+        options.DropDownItems.Add(BuildLanguageMenu());
+        options.DropDownItems.Add(new ToolStripSeparator());
         _autostartItem.Click += (_, _) => ToggleAutostart();
         _trayItem.Click += (_, _) =>
         {
@@ -149,25 +196,57 @@ internal sealed class MainForm : Form
         };
         options.DropDownItems.Add(_autostartItem);
         options.DropDownItems.Add(_trayItem);
+        options.DropDownItems.Add(new ToolStripSeparator());
+        options.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.dataFolder", "Открыть папку с данными (user_data)"), null, (_, _) => OpenFolder(AppPaths.UserData)));
         options.DropDownOpening += (_, _) =>
         {
             _autostartItem.Checked = Autostart.IsEnabled;
             _trayItem.Checked = _settings.MinimizeToTray;
         };
 
-        var help = new ToolStripMenuItem("Справка");
-        help.DropDownItems.Add(new ToolStripMenuItem("Как это работает", null, (_, _) => ShowHowItWorks()));
-        help.DropDownItems.Add(new ToolStripMenuItem("О программе", null, (_, _) => ShowAbout()));
+        var help = new ToolStripMenuItem(L.T("menu.help", "Справка"));
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.howItWorks", "Как это работает"), null, (_, _) => ShowHowItWorks()));
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.checkFiles", "Проверить файлы программы"), null, (_, _) => RequestReopen()));
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.checkUpdates", "Проверить обновления"), null, (_, _) => NoticeBar.OpenReleases()));
+        help.DropDownItems.Add(new ToolStripSeparator());
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.about", "О программе"), null, (_, _) => ShowAbout()));
 
         menu.Items.AddRange(new ToolStripItem[] { file, device, options, help });
         return menu;
     }
 
-    void AddProtocolItem(ToolStripMenuItem parent, ProtocolMode mode, string text)
+    ToolStripMenuItem BuildThemeMenu()
     {
-        var item = new ToolStripMenuItem(text, null, (_, _) => SetProtocol(mode));
-        _protocolItems[mode] = item;
-        parent.DropDownItems.Add(item);
+        var menu = new ToolStripMenuItem(L.T("menu.theme", "Тема"));
+        if (menu.DropDown is ToolStripDropDownMenu dropDown) dropDown.ShowCheckMargin = true;
+        if (ThemeStore.All.Count == 0)
+            menu.DropDownItems.Add(new ToolStripMenuItem(ThemeStore.Current.Title) { Checked = true, Enabled = false });
+        foreach (var theme in ThemeStore.All)
+        {
+            string id = theme.Id;
+            menu.DropDownItems.Add(new ToolStripMenuItem(theme.Title, ThemeStore.Swatch(theme, Theme.S(16)), (_, _) => SetTheme(id))
+            {
+                Checked = id == ThemeStore.Current.Id,
+            });
+        }
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.theme.folder", "Открыть папку тем"), null, (_, _) => OpenFolder(AppPaths.Themes)));
+        return menu;
+    }
+
+    ToolStripMenuItem BuildLanguageMenu()
+    {
+        var menu = new ToolStripMenuItem(L.T("menu.language", "Язык / Language"));
+        if (L.Available.Count == 0)
+            menu.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.language.builtin", "Русский (встроенный)")) { Checked = true, Enabled = false });
+        foreach (var language in L.Available)
+        {
+            string code = language.Code;
+            menu.DropDownItems.Add(new ToolStripMenuItem(language.Name, null, (_, _) => SetLanguage(code)) { Checked = code == L.Code });
+        }
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.language.folder", "Открыть папку языков"), null, (_, _) => OpenFolder(AppPaths.Languages)));
+        return menu;
     }
 
     Control BuildHeader()
@@ -177,7 +256,7 @@ internal sealed class MainForm : Form
         var grid = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 7,
+            ColumnCount = 9,
             RowCount = 1,
             BackColor = Theme.Surface,
             Padding = new Padding(Theme.S(18), 0, Theme.S(18), 0),
@@ -186,7 +265,7 @@ internal sealed class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (int i = 0; i < 4; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (int i = 0; i < 6; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         _deviceDot.Size = new Size(Theme.S(12), Theme.S(12));
         _deviceDot.Anchor = AnchorStyles.Left;
@@ -203,9 +282,27 @@ internal sealed class MainForm : Form
         _dirtyLabel.ForeColor = Theme.Warning;
         _dirtyLabel.Margin = new Padding(Theme.S(12), 0, Theme.S(16), 0);
 
-        _layerLabel.Text = "Слой:";
+        _presetLabel.Text = L.T("header.preset", "Пресет:");
+        _presetLabel.AutoSize = true;
+        _presetLabel.Anchor = AnchorStyles.Right;
+        _presetLabel.ForeColor = Theme.Muted;
+        _presetLabel.Margin = new Padding(0, 0, Theme.S(6), 0);
+
+        _presetBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _presetBox.Width = Theme.S(180);
+        _presetBox.MaxDropDownItems = 16;
+        _presetBox.Anchor = AnchorStyles.Left;
+        _presetBox.Margin = new Padding(0, 0, Theme.S(16), 0);
+        _presetBox.SelectedIndexChanged += (_, _) =>
+        {
+            if (_suppressPresetEvent || _presetBox.SelectedItem is not string name) return;
+            SwitchPreset(name);
+        };
+
+        _layerLabel.Text = L.T("header.layer", "Слой:");
         _layerLabel.AutoSize = true;
         _layerLabel.Anchor = AnchorStyles.Right;
+        _layerLabel.ForeColor = Theme.Muted;
         _layerLabel.Margin = new Padding(0, 0, Theme.S(6), 0);
 
         _layerBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -220,11 +317,13 @@ internal sealed class MainForm : Form
             _pad.Invalidate();
         };
 
-        _writeButton.Text = "Записать в устройство";
-        _writeButton.Size = new Size(Theme.S(230), Theme.S(40));
+        _writeButton.Text = L.T("header.write", "Записать в устройство");
+        _writeButton.AutoSize = true;
+        _writeButton.MinimumSize = new Size(Theme.S(200), Theme.S(40));
+        _writeButton.Padding = new Padding(Theme.S(12), 0, Theme.S(12), 0);
         _writeButton.FlatStyle = FlatStyle.Flat;
         _writeButton.BackColor = Theme.Accent;
-        _writeButton.ForeColor = Color.White;
+        _writeButton.ForeColor = Theme.OnAccent;
         _writeButton.Font = Theme.Strong;
         _writeButton.Cursor = Cursors.Hand;
         _writeButton.Anchor = AnchorStyles.Right;
@@ -238,9 +337,11 @@ internal sealed class MainForm : Form
         grid.Controls.Add(_deviceText, 1, 0);
         grid.Controls.Add(new Panel { Margin = new Padding(0), Size = new Size(1, 1) }, 2, 0);
         grid.Controls.Add(_dirtyLabel, 3, 0);
-        grid.Controls.Add(_layerLabel, 4, 0);
-        grid.Controls.Add(_layerBox, 5, 0);
-        grid.Controls.Add(_writeButton, 6, 0);
+        grid.Controls.Add(_presetLabel, 4, 0);
+        grid.Controls.Add(_presetBox, 5, 0);
+        grid.Controls.Add(_layerLabel, 6, 0);
+        grid.Controls.Add(_layerBox, 7, 0);
+        grid.Controls.Add(_writeButton, 8, 0);
         header.Controls.Add(grid);
         return header;
     }
@@ -278,12 +379,21 @@ internal sealed class MainForm : Form
 
     StatusStrip BuildStatusBar()
     {
-        var strip = new StatusStrip { SizingGrip = false, BackColor = Theme.Surface, Padding = new Padding(Theme.S(10), 0, Theme.S(10), 0) };
+        var strip = new StatusStrip
+        {
+            SizingGrip = false,
+            BackColor = Theme.Surface,
+            RenderMode = ToolStripRenderMode.ManagerRenderMode,
+            Padding = new Padding(Theme.S(10), 0, Theme.S(10), 0),
+        };
         _status.Spring = true;
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.ForeColor = Theme.Text;
+        _driverStatus.ForeColor = Theme.Muted;
+        _driverStatus.Margin = new Padding(Theme.S(12), 0, Theme.S(12), 0);
         _agentStatus.ForeColor = Theme.Muted;
         strip.Items.Add(_status);
+        strip.Items.Add(_driverStatus);
         strip.Items.Add(_agentStatus);
         return strip;
     }
@@ -291,14 +401,14 @@ internal sealed class MainForm : Form
     void BuildTray()
     {
         var menu = new ContextMenuStrip();
-        var open = new ToolStripMenuItem("Открыть " + AppName, null, (_, _) => ShowFromTray());
+        var open = new ToolStripMenuItem(L.F("tray.open", "Открыть {0}", AppName), null, (_, _) => ShowFromTray());
         open.Font = new Font(menu.Font, FontStyle.Bold);
         menu.Items.Add(open);
-        menu.Items.Add(new ToolStripMenuItem("Записать в устройство", null, async (_, _) => await WriteToDeviceAsync()));
-        menu.Items.Add(new ToolStripMenuItem("Монитор нажатий…", null, (_, _) => ShowMonitor()));
-        menu.Items.Add(new ToolStripMenuItem("Проверить запись…", null, (_, _) => ShowWizard()));
+        menu.Items.Add(new ToolStripMenuItem(L.T("menu.write", "Записать в устройство"), null, async (_, _) => await WriteToDeviceAsync()));
+        menu.Items.Add(new ToolStripMenuItem(L.T("menu.monitor", "Монитор нажатий…"), null, (_, _) => ShowMonitor()));
+        menu.Items.Add(new ToolStripMenuItem(L.T("menu.wizard", "Проверить запись…"), null, (_, _) => ShowWizard()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Выход", null, (_, _) => ExitApp()));
+        menu.Items.Add(new ToolStripMenuItem(L.T("menu.exit", "Выход"), null, (_, _) => ExitApp()));
 
         _tray.ContextMenuStrip = menu;
         _tray.Icon = Theme.SmallIcon;
@@ -381,6 +491,16 @@ internal sealed class MainForm : Form
         Close();
     }
 
+    /// <summary>Закрывает окно, чтобы программа открыла его заново: так применяются тема, язык и перечитываются файлы ресурсов.</summary>
+    void RequestReopen()
+    {
+        if (!_interactive) return;
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        Reopen = new ReopenState(bounds, WindowState, _pad.Selected, _layer);
+        _exiting = true;
+        Close();
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (!_exiting && _interactive && e.CloseReason == CloseReason.UserClosing && _settings.MinimizeToTray)
@@ -391,8 +511,8 @@ internal sealed class MainForm : Form
             {
                 _settings.TrayHintShown = true;
                 ScheduleSave();
-                _tray.ShowBalloonTip(5000, AppName + " работает в фоне",
-                    "Действия клавиш, которые выполняет программа, продолжают работать. Чтобы выйти, щёлкните правой кнопкой по значку.",
+                _tray.ShowBalloonTip(5000, L.F("tray.background.title", "{0} работает в фоне", AppName),
+                    L.T("tray.background.text", "Действия клавиш, которые выполняет программа, продолжают работать. Чтобы выйти, щёлкните правой кнопкой по значку."),
                     ToolTipIcon.Info);
             }
             return;
@@ -448,30 +568,24 @@ internal sealed class MainForm : Form
     {
         _deviceTimer.Stop();
         _device = MacroPadDevice.FindConfigInterface();
-        if (_device != null && MacroPadDevice.DetectProtocol() is { } detected && detected != _settings.DetectedProtocol)
+        if (_device != null && MacroPadDevice.DetectDriver() is { } detected && detected.Id != _settings.DetectedDriverId)
         {
-            _settings.DetectedProtocol = detected;
-            AfterProtocolChanged();
+            _settings.DetectedDriverId = detected.Id;
+            AfterDriverChanged();
         }
 
         if (_device != null)
         {
             _deviceDot.DotColor = Theme.Success;
-            _deviceText.Text = $"Устройство подключено  ·  CH552 {_device.VendorId:X4}:{_device.ProductId:X4}  ·  {ProtocolTitle(_settings.EffectiveProtocol)}";
+            _deviceText.Text = L.F("device.connected", "Устройство подключено  ·  {0:X4}:{1:X4}", _device.VendorId, _device.ProductId);
         }
         else
         {
             _deviceDot.DotColor = Theme.Danger;
-            _deviceText.Text = "Устройство не найдено — подключите его USB-кабелем";
+            _deviceText.Text = L.T("device.notFound", "Устройство не найдено — подключите его USB-кабелем");
         }
+        _driverStatus.Text = L.F("status.driver", "Драйвер: {0}", _settings.EffectiveDriver.Title);
     }
-
-    static string ProtocolTitle(ProtocolMode mode) => mode switch
-    {
-        ProtocolMode.Legacy => "формат ch57x",
-        ProtocolMode.Vendor => "как у официальной программы",
-        _ => "прямой протокол",
-    };
 
     async void ShowWizard()
     {
@@ -482,36 +596,43 @@ internal sealed class MainForm : Form
 
         // В клавиатуре теперь тестовые буквы — настройки придётся записать заново.
         _settings.LastWrittenSignature = null;
-        if (wizard.Result is not ProtocolMode mode)
+        var driver = wizard.Result is ProtocolMode mode
+            ? _settings.EffectiveDriver.Protocol == mode ? _settings.EffectiveDriver : DriverStore.FirstWith(mode)
+            : null;
+        if (driver == null)
         {
             UpdateDirty();
             ScheduleSave();
             return;
         }
 
-        _settings.Protocol = mode;
-        if (wizard.KnobSlots != null) _settings.KnobSlots = wizard.KnobSlots;
-        AfterProtocolChanged();
+        _settings.DriverId = driver.Id;
+        if (wizard.KnobSlots != null)
+        {
+            _settings.LearnedKnobSlots ??= new();
+            _settings.LearnedKnobSlots[driver.Id] = wizard.KnobSlots;
+        }
+        AfterDriverChanged();
         RefreshDevice();
-        if (MessageBox.Show(this, $"Способ записи «{ProtocolTitle(mode)}» сохранён.\n\nЗаписать в клавиатуру ваши настройки?",
+        if (MessageBox.Show(this, L.F("wizard.apply", "Драйвер «{0}» сохранён.\n\nЗаписать в клавиатуру ваши настройки?", driver.Title),
                 AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             await WriteToDeviceAsync();
     }
 
-    void SetProtocol(ProtocolMode mode)
+    void SetDriver(string? id)
     {
-        if (_settings.Protocol == mode) return;
-        _settings.Protocol = mode;
-        AfterProtocolChanged();
+        if (_settings.DriverId == id) return;
+        _settings.DriverId = id;
+        AfterDriverChanged();
         RefreshDevice();
-        SetStatus("Способ записи: " + ProtocolTitle(_settings.EffectiveProtocol) + ". Нажмите «Записать в устройство», чтобы применить.");
+        SetStatus(L.F("status.driverChanged", "Драйвер: {0}. Нажмите «Записать в устройство», чтобы применить.", _settings.EffectiveDriver.Title));
     }
 
-    void AfterProtocolChanged()
+    void AfterDriverChanged()
     {
         _settings.EnsureTriggers();
         RebuildLayerUi();
-        UpdateProtocolMenu();
+        UpdateDriverMenu();
         SelectControl(_pad.Selected);
         _pad.Invalidate();
         UpdateDirty();
@@ -519,11 +640,16 @@ internal sealed class MainForm : Form
         ScheduleSave();
     }
 
-    void UpdateProtocolMenu()
+    void UpdateDriverMenu()
     {
-        foreach (var (mode, item) in _protocolItems) item.Checked = mode == _settings.Protocol;
+        string? detected = DriverStore.Find(_settings.DetectedDriverId)?.Title;
+        _autoDriverItem.Text = _settings.DriverId == null && detected != null
+            ? L.F("menu.driver.autoNow", "Определять автоматически (сейчас: {0})", detected)
+            : L.T("menu.driver.auto", "Определять автоматически");
+        _autoDriverItem.Checked = _settings.DriverId == null;
+        foreach (var (id, item) in _driverItems) item.Checked = id == _settings.DriverId;
         _layersMenu.Enabled = _settings.EffectiveProtocol == ProtocolMode.Legacy;
-        _layersMenu.ToolTipText = _layersMenu.Enabled ? "" : "Прямой протокол не поддерживает слои";
+        _layersMenu.ToolTipText = _layersMenu.Enabled ? "" : L.T("menu.layers.unsupported", "Этот драйвер не поддерживает слои");
     }
 
     void UpdateDirty()
@@ -531,8 +657,8 @@ internal sealed class MainForm : Form
         _settings.EnsureTriggers();
         string signature = ProfileCompiler.Signature(ProfileCompiler.Compile(_settings));
         _dirtyLabel.Text = _settings.LastWrittenSignature == null
-            ? "● Настройки ещё не записаны в устройство"
-            : "● Есть незаписанные изменения";
+            ? L.T("header.notWritten", "● Ещё не записано в устройство")
+            : L.T("header.unsaved", "● Есть незаписанные изменения");
         _dirtyLabel.Visible = signature != _settings.LastWrittenSignature;
     }
 
@@ -543,7 +669,7 @@ internal sealed class MainForm : Form
         if (_device is not { } device)
         {
             MessageBox.Show(this,
-                "Макро-клавиатура не найдена.\n\nПодключите её USB-кабелем (по Bluetooth запись не работает) и попробуйте ещё раз.",
+                L.T("write.noDevice", "Макро-клавиатура не найдена.\n\nПодключите её USB-кабелем (по Bluetooth запись не работает) и попробуйте ещё раз."),
                 AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -554,10 +680,10 @@ internal sealed class MainForm : Form
         _writing = true;
         _writeButton.Enabled = false;
         UseWaitCursor = true;
-        SetStatus("Запись в устройство…");
+        SetStatus(L.T("status.writing", "Запись в устройство…"));
         try
         {
-            var progress = new Progress<int>(p => SetStatus($"Запись в устройство… {p}%"));
+            var progress = new Progress<int>(p => SetStatus(L.F("status.writingProgress", "Запись в устройство… {0}%", p)));
             await Task.Run(() =>
             {
                 using var pad = MacroPadDevice.Open(device);
@@ -565,13 +691,13 @@ internal sealed class MainForm : Form
             });
             _settings.LastWrittenSignature = ProfileCompiler.Signature(packets);
             SaveNow();
-            SetStatus("✓ Записано. Переподключите кабель клавиатуры и проверьте в «Устройство → Монитор нажатий» (F8).");
+            SetStatus(L.T("status.written", "✓ Записано. Переподключите кабель клавиатуры и проверьте в «Устройство → Монитор нажатий» (F8)."));
         }
         catch (Exception ex)
         {
-            SetStatus("Ошибка записи: " + ex.Message);
-            MessageBox.Show(this, "Не удалось записать настройки в устройство:\n\n" + ex.Message +
-                                  "\n\nПереподключите клавиатуру и попробуйте ещё раз.", AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            SetStatus(L.F("status.writeError", "Ошибка записи: {0}", ex.Message));
+            MessageBox.Show(this, L.F("write.error", "Не удалось записать настройки в устройство:\n\n{0}\n\nПереподключите клавиатуру и попробуйте ещё раз.", ex.Message),
+                AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -601,12 +727,14 @@ internal sealed class MainForm : Form
 
         if (_failedSlots.Count > 0)
         {
-            _agentStatus.Text = "⚠ Служебные клавиши заняты другой программой: " + string.Join(", ", _failedSlots.Select(TriggerKeys.Describe));
+            _agentStatus.Text = L.F("status.agentBusy", "⚠ Служебные клавиши заняты другой программой: {0}", string.Join(", ", _failedSlots.Select(TriggerKeys.Describe)));
             _agentStatus.ForeColor = Theme.Danger;
         }
         else
         {
-            _agentStatus.Text = slots.Count == 0 ? "Фоновые действия: не используются" : $"Фоновые действия: {slots.Count}, работают";
+            _agentStatus.Text = slots.Count == 0
+                ? L.T("status.agentNone", "Фоновые действия: не используются")
+                : L.F("status.agentCount", "Фоновые действия: {0}, работают", slots.Count);
             _agentStatus.ForeColor = Theme.Muted;
         }
     }
@@ -627,11 +755,12 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            _monitor?.LogAgent("ошибка: " + ex.Message);
+            _monitor?.LogAgent(L.F("monitor.agentError", "ошибка: {0}", ex.Message));
+            string title = L.T("action.failed", "Не удалось выполнить действие");
             if (fromTest || Visible)
-                MessageBox.Show(this, ex.Message, "Не удалось выполнить действие", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             else
-                _tray.ShowBalloonTip(5000, "Не удалось выполнить действие", ex.Message, ToolTipIcon.Warning);
+                _tray.ShowBalloonTip(5000, title, ex.Message, ToolTipIcon.Warning);
         }
     }
 
@@ -644,7 +773,7 @@ internal sealed class MainForm : Form
         _suppressLayerEvent = true;
         _layerBox.BeginUpdate();
         _layerBox.Items.Clear();
-        for (int i = 0; i < layers; i++) _layerBox.Items.Add($"Слой {i + 1}");
+        for (int i = 0; i < layers; i++) _layerBox.Items.Add(L.F("header.layerN", "Слой {0}", i + 1));
         _layerBox.EndUpdate();
         _layerBox.SelectedIndex = _layer;
         _suppressLayerEvent = false;
@@ -664,7 +793,7 @@ internal sealed class MainForm : Form
         ApplyAgent();
         ScheduleSave();
         if (count > 1)
-            SetStatus("Слои переключаются на самом устройстве (обычно отдельной кнопкой или комбинацией) — это зависит от модели.");
+            SetStatus(L.T("status.layers", "Слои переключаются на самом устройстве (обычно отдельной кнопкой или комбинацией) — это зависит от модели."));
     }
 
     void AfterProfileReplaced()
@@ -684,58 +813,208 @@ internal sealed class MainForm : Form
         {
             Autostart.Set(!Autostart.IsEnabled);
             SetStatus(Autostart.IsEnabled
-                ? $"Автозапуск включён: {AppName} будет запускаться в трее вместе с Windows."
-                : "Автозапуск выключен.");
+                ? L.F("status.autostartOn", "Автозапуск включён: {0} будет запускаться в трее вместе с Windows.", AppName)
+                : L.T("status.autostartOff", "Автозапуск выключен."));
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Не удалось изменить автозапуск:\n\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, L.F("autostart.error", "Не удалось изменить автозапуск:\n\n{0}", ex.Message), AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         _autostartItem.Checked = Autostart.IsEnabled;
     }
 
-    // ───────────────────────── Профили ─────────────────────────
+    // ───────────────────────── Тема и язык ─────────────────────────
 
-    void OpenProfile()
+    void SetTheme(string id)
     {
-        using var dialog = new OpenFileDialog { Title = "Открыть профиль", Filter = "Профиль OshiMakiKey (*.json)|*.json|Все файлы (*.*)|*.*" };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (id == ThemeStore.Current.Id) return;
+        _settings.Theme = id;
+        RequestReopen();
+    }
+
+    void SetLanguage(string code)
+    {
+        if (code == L.Code) return;
+        _settings.Language = code;
+        RequestReopen();
+    }
+
+    void OpenFolder(string path)
+    {
         try
         {
-            _settings.Profile = SettingsStore.LoadProfile(dialog.FileName);
-            AfterProfileReplaced();
-            SetStatus("Профиль загружен. Нажмите «Записать в устройство», чтобы применить его.");
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true })?.Dispose();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show(this, "Не удалось открыть профиль:\n\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
-    void SaveProfileAs()
+    // ───────────────────────── Пресеты ─────────────────────────
+
+    void RefreshPresets()
     {
-        string name = string.Join("_", _settings.Profile.Name.Split(Path.GetInvalidFileNameChars()));
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Сохранить профиль",
-            Filter = "Профиль OshiMakiKey (*.json)|*.json",
-            FileName = (name.Length > 0 ? name : "profile") + ".json",
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _suppressPresetEvent = true;
+        _presetBox.BeginUpdate();
+        _presetBox.Items.Clear();
+        foreach (var name in PresetStore.Names()) _presetBox.Items.Add(name);
+        if (_settings.ActivePreset != null && !_presetBox.Items.Contains(_settings.ActivePreset)) _presetBox.Items.Add(_settings.ActivePreset);
+        _presetBox.EndUpdate();
+        _presetBox.SelectedItem = _settings.ActivePreset;
+        _suppressPresetEvent = false;
+    }
+
+    /// <summary>Делает пресет активным и показывает его. Текущий перед этим сохраняется.</summary>
+    void ActivatePreset(string name, Profile profile)
+    {
+        _settings.Profile = profile;
+        _settings.ActivePreset = name;
+        AfterProfileReplaced();
+        SaveNow();
+        RefreshPresets();
+    }
+
+    void SwitchPreset(string name)
+    {
+        if (name == _settings.ActivePreset) return;
+        SaveNow();
         try
         {
-            SettingsStore.SaveProfile(_settings.Profile, dialog.FileName);
-            SetStatus("Профиль сохранён: " + dialog.FileName);
+            ActivatePreset(name, PresetStore.Load(name));
+            SetStatus(L.F("status.presetSwitched", "Пресет «{0}». Нажмите «Записать в устройство», чтобы применить его.", name));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, "Не удалось сохранить профиль:\n\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, L.F("preset.loadError", "Не удалось открыть пресет «{0}»:\n\n{1}", name, ex.Message), AppName,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            RefreshPresets();
+        }
+    }
+
+    /// <summary>Спрашивает название пресета. Null — отмена.</summary>
+    string? AskPresetName(string title, string prompt, string initial, string? current = null) =>
+        InputDialog.Ask(this, title, prompt, initial, text =>
+        {
+            string name = PresetStore.Clean(text);
+            if (name.Length == 0) return L.T("preset.nameEmpty", "Введите название.");
+            bool same = current != null && string.Equals(name, current, StringComparison.OrdinalIgnoreCase);
+            return PresetStore.Exists(name) && !same ? L.F("preset.exists", "Пресет «{0}» уже есть — выберите другое название.", name) : null;
+        }) is string answer ? PresetStore.Clean(answer) : null;
+
+    void NewPreset()
+    {
+        string? name = AskPresetName(L.T("preset.new.title", "Новый пресет"),
+            L.T("preset.new.prompt", "Название нового пресета. Он начнётся с примера настроек."),
+            PresetStore.Unique(L.T("preset.new.name", "Новый пресет")));
+        if (name == null) return;
+        SaveNow();
+        RunPresetCommand(() =>
+        {
+            var profile = Profile.CreateDefault();
+            PresetStore.Save(name, profile);
+            ActivatePreset(name, profile);
+        });
+    }
+
+    void DuplicatePreset()
+    {
+        string? name = AskPresetName(L.T("preset.saveAs.title", "Сохранить как новый пресет"),
+            L.T("preset.saveAs.prompt", "Название копии текущего пресета:"),
+            PresetStore.Unique(_settings.ActivePreset ?? L.T("preset.default", "Основной")));
+        if (name == null) return;
+        SaveNow();
+        RunPresetCommand(() =>
+        {
+            var copy = JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(_settings.Profile, SettingsStore.Json), SettingsStore.Json)!;
+            PresetStore.Save(name, copy);
+            ActivatePreset(name, copy);
+        });
+    }
+
+    void RenamePreset()
+    {
+        string? current = _settings.ActivePreset;
+        if (current == null) return;
+        string? name = AskPresetName(L.T("preset.rename.title", "Переименовать пресет"),
+            L.T("preset.rename.prompt", "Новое название пресета:"), current, current);
+        if (name == null || name == current) return;
+        SaveNow();
+        RunPresetCommand(() =>
+        {
+            PresetStore.Rename(current, name);
+            ActivatePreset(name, _settings.Profile);
+        });
+    }
+
+    void DeletePreset()
+    {
+        string? current = _settings.ActivePreset;
+        if (current == null || PresetStore.Names().Count <= 1) return;
+        if (MessageBox.Show(this, L.F("preset.delete.confirm", "Удалить пресет «{0}»? Это нельзя отменить.", current), AppName,
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        RunPresetCommand(() =>
+        {
+            PresetStore.Delete(current);
+            string next = PresetStore.Names()[0];
+            ActivatePreset(next, PresetStore.Load(next));
+        });
+    }
+
+    void ImportPreset()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = L.T("preset.import.title", "Импорт пресета"),
+            Filter = L.T("filter.preset", "Пресет OshiMakiKey (*.json)|*.json") + "|" + L.T("filter.all", "Все файлы (*.*)|*.*"),
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        SaveNow();
+        RunPresetCommand(() =>
+        {
+            var profile = SettingsStore.ReadProfile(dialog.FileName);
+            string baseName = profile.Name.Length > 0 ? profile.Name : Path.GetFileNameWithoutExtension(dialog.FileName);
+            string name = PresetStore.Unique(baseName.Length > 0 ? baseName : L.T("preset.new.name", "Новый пресет"));
+            PresetStore.Save(name, profile);
+            ActivatePreset(name, profile);
+            SetStatus(L.F("status.presetImported", "Пресет «{0}» добавлен. Нажмите «Записать в устройство», чтобы применить его.", name));
+        });
+    }
+
+    void ExportPreset()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = L.T("preset.export.title", "Экспорт пресета"),
+            Filter = L.T("filter.preset", "Пресет OshiMakiKey (*.json)|*.json"),
+            FileName = (_settings.ActivePreset ?? "preset") + ".json",
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        RunPresetCommand(() =>
+        {
+            SettingsStore.WriteProfile(_settings.Profile, dialog.FileName);
+            SetStatus(L.F("status.presetExported", "Пресет сохранён: {0}", dialog.FileName));
+        });
+    }
+
+    void RunPresetCommand(Action command)
+    {
+        try
+        {
+            command();
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, L.F("preset.error", "Не удалось выполнить действие с пресетом:\n\n{0}", ex.Message), AppName,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            RefreshPresets();
         }
     }
 
     void ClearLayer()
     {
-        if (MessageBox.Show(this, "Сбросить все действия текущего слоя на «Нет действия»?", AppName,
+        if (MessageBox.Show(this, L.T("clear.confirm", "Сбросить все действия текущего слоя на «Нет действия»?"), AppName,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         foreach (var id in Enum.GetValues<ControlId>()) CurrentLayer.Actions[id] = new PadAction();
         AfterProfileReplaced();
@@ -743,7 +1022,7 @@ internal sealed class MainForm : Form
 
     void ResetToDefault()
     {
-        if (MessageBox.Show(this, "Заменить все настройки примером (копировать, вставить, отменить, музыка, громкость)?", AppName,
+        if (MessageBox.Show(this, L.T("reset.confirm", "Заменить все настройки текущего пресета примером (копировать, вставить, отменить, музыка, громкость)?"), AppName,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         _settings.Profile = Profile.CreateDefault();
         AfterProfileReplaced();
@@ -752,23 +1031,18 @@ internal sealed class MainForm : Form
     // ───────────────────────── Справка ─────────────────────────
 
     void ShowHowItWorks() => MessageBox.Show(this,
-        "1. Слева выберите клавишу или действие ручки.\n" +
-        "2. Справа выберите, что оно должно делать.\n" +
-        "3. Нажмите «Записать в устройство».\n" +
-        "4. Проверьте результат в «Устройство → Монитор нажатий» (F8).\n\n" +
-        "Действия с отметкой ✓ записываются в память самой клавиатуры и работают даже без программы.\n\n" +
-        "Действия с отметкой ⚙ клавиатура сама выполнить не может (у новой ревизии CH552 это мультимедиа, мышь, " +
-        "последовательности нажатий и все системные действия). Для них устройство отправляет служебную клавишу F13–F24, " +
-        $"а {AppName}, работающая в трее, выполняет действие. Включите «Настройки → Запускать вместе с Windows», чтобы это работало всегда.\n\n" +
-        "Запись идёт только по USB-кабелю. Драйвер не нужен — используется стандартный драйвер Windows.",
-        "Как это работает", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        L.F("help.text",
+            "1. Слева выберите клавишу или действие ручки.\n2. Справа выберите, что оно должно делать.\n3. Нажмите «Записать в устройство».\n4. Проверьте результат в «Устройство → Монитор нажатий» (F8).\n\nДействия с отметкой ✓ записываются в память самой клавиатуры и работают даже без программы.\n\nДействия с отметкой ⚙ клавиатура сама выполнить не может (у новой ревизии CH552 это мультимедиа, мышь, последовательности нажатий и все системные действия). Для них устройство отправляет служебную клавишу F13–F24, а {0}, работающая в трее, выполняет действие. Включите «Настройки → Запускать вместе с Windows», чтобы это работало всегда.\n\nРаскладки хранятся в пресетах — переключайте их в шапке окна. Запись идёт только по USB-кабелю. Драйвер Windows не нужен — используется стандартный.",
+            AppName),
+        L.T("menu.howItWorks", "Как это работает"), MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     void ShowAbout() => MessageBox.Show(this,
-        $"{AppName} {Branding.Version}\n\nНастройка макро-клавиатур на чипе CH552 (USB ID 1189:8890): 6 клавиш и ручка.\n\n" +
-        $"Способ записи сейчас: {ProtocolTitle(_settings.EffectiveProtocol)}.\n" +
-        "Протоколы: kriomant/ch57x-keyboard-tool и rOzzy1987/MacroPad.\n\n" +
-        "Настройки хранятся в: " + SettingsStore.FilePath,
-        "О программе", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        L.F("about.text",
+            "{0} {1}\n\nНастройка макро-клавиатур на чипах CH552 / CH57x: 6 клавиш и ручка.\n\nДрайвер: {2}\nТема: {3}\nЯзык: {4}\n\nПротоколы: kriomant/ch57x-keyboard-tool и barkleesanders/padclaude.\n\nДанные программы: {5}\n{6}",
+            AppName, Branding.Version, _settings.EffectiveDriver.Title, ThemeStore.Current.Title,
+            L.Available.FirstOrDefault(l => l.Code == L.Code)?.Name ?? L.T("menu.language.builtin", "Русский (встроенный)"),
+            AppPaths.UserData, Branding.Website),
+        L.T("menu.about", "О программе"), MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     // ───────────────────────── Служебное ─────────────────────────
 
@@ -790,7 +1064,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            SetStatus("Не удалось сохранить настройки: " + ex.Message);
+            SetStatus(L.F("status.saveError", "Не удалось сохранить настройки: {0}", ex.Message));
         }
     }
 }

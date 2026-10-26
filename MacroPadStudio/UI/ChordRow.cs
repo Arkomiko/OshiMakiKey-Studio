@@ -29,24 +29,27 @@ internal sealed class KeyCaptureBox : TextBox
     {
         ReadOnly = true;
         ShortcutsEnabled = false;
-        BackColor = Color.White;
+        BackColor = Theme.Input;
+        ForeColor = Theme.InputText;
         Cursor = Cursors.Hand;
         TextAlign = HorizontalAlignment.Center;
         Font = Theme.Strong;
-        PlaceholderText = "щёлкните и нажмите клавиши";
+        PlaceholderText = L.T("capture.placeholder", "щёлкните и нажмите клавиши");
     }
 
     protected override void OnGotFocus(EventArgs e)
     {
         base.OnGotFocus(e);
         BackColor = Theme.AccentSoft;
+        ForeColor = Theme.AccentText;
         ResetCapture();
     }
 
     protected override void OnLostFocus(EventArgs e)
     {
         base.OnLostFocus(e);
-        BackColor = Color.White;
+        BackColor = Theme.Input;
+        ForeColor = Theme.InputText;
         ResetCapture();
     }
 
@@ -123,14 +126,14 @@ internal sealed class KeyCaptureBox : TextBox
 /// <summary>Строка редактора одного нажатия: поле записи, флажки модификаторов, выбор клавиши из списка.</summary>
 internal sealed class ChordRow : FlowLayoutPanel
 {
-    static readonly Choice<byte>[] KeyChoices = new[] { new Choice<byte>(0, "(без клавиши)") }
+    readonly Choice<byte>[] _keyChoices = new[] { new Choice<byte>(0, L.T("chord.noKey", "(без клавиши)")) }
         .Concat(KeyCatalog.All.Select(k => new Choice<byte>(k.Code, k.ListName)))
         .ToArray();
 
     readonly KeyChord _chord;
     readonly KeyCaptureBox _capture = new();
     readonly CheckBox _ctrl = Modifier("Ctrl"), _shift = Modifier("Shift"), _alt = Modifier("Alt"), _win = Modifier("Win");
-    readonly ComboBox _key = new();
+    readonly ThemedComboBox _key = new();
     readonly Button _remove = new();
     readonly ToolTip _tips = new();
     bool _loading;
@@ -156,7 +159,7 @@ internal sealed class ChordRow : FlowLayoutPanel
         _key.Width = Theme.S(132);
         _key.MaxDropDownItems = 18;
         _key.Margin = new Padding(Theme.S(4), Theme.S(1), Theme.S(4), 0);
-        _key.Items.AddRange(KeyChoices);
+        _key.Items.AddRange(_keyChoices);
 
         _remove.Text = "✕";
         _remove.Size = new Size(Theme.S(30), Theme.S(27));
@@ -167,11 +170,12 @@ internal sealed class ChordRow : FlowLayoutPanel
         _remove.Cursor = Cursors.Hand;
         _remove.Margin = new Padding(0);
 
-        _tips.SetToolTip(_capture, "Щёлкните сюда и нажмите нужную комбинацию на клавиатуре");
-        _tips.SetToolTip(_key, "Клавишу можно выбрать и вручную");
-        _tips.SetToolTip(_remove, "Удалить это нажатие");
+        _tips.SetToolTip(_capture, L.T("chord.captureTip", "Щёлкните сюда и нажмите нужную комбинацию на клавиатуре"));
+        _tips.SetToolTip(_key, L.T("chord.keyTip", "Клавишу можно выбрать и вручную"));
+        _tips.SetToolTip(_remove, L.T("chord.removeTip", "Удалить это нажатие"));
 
         Controls.AddRange(new Control[] { _capture, _ctrl, _shift, _alt, _win, _key, _remove });
+        Theme.Style(this);
         LoadFromChord();
 
         foreach (var box in new[] { _ctrl, _shift, _alt, _win }) box.CheckedChanged += (_, _) => FromControls();
@@ -196,7 +200,7 @@ internal sealed class ChordRow : FlowLayoutPanel
         _shift.Checked = _chord.Shift;
         _alt.Checked = _chord.Alt;
         _win.Checked = _chord.Win;
-        int index = Array.FindIndex(KeyChoices, c => c.Value == _chord.Key);
+        int index = Array.FindIndex(_keyChoices, c => c.Value == _chord.Key);
         _key.SelectedIndex = index < 0 ? 0 : index;
         _capture.DisplayText = _chord.IsEmpty ? "" : BindingText.Chord(_chord);
         _loading = false;

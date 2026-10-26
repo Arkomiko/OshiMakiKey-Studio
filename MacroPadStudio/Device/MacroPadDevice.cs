@@ -5,11 +5,11 @@ using static OshiMakiKey.Device.NativeMethods;
 
 namespace OshiMakiKey.Device;
 
-
 /// <summary>Открытый служебный интерфейс макро-клавиатуры, через который пишется конфигурация.</summary>
 public sealed class MacroPadDevice : IDisposable
 {
-    public static readonly (ushort Vid, ushort Pid)[] Supported = { (0x1189, 0x8890) };
+    /// <summary>USB ID плат, которые знают драйверы.</summary>
+    public static IReadOnlyList<(ushort Vid, ushort Pid)> Supported => DriverStore.SupportedIds;
 
     const int WriteTimeoutMs = 1000;
 
@@ -34,16 +34,15 @@ public sealed class MacroPadDevice : IDisposable
     }
 
     /// <summary>
-    /// Определяет формат по мультимедиа-интерфейсу. Битовый (только кнопки, без значений) — у CH552 6 клавиш + ручка,
-    /// которая понимает прямой формат (установлено диагностикой). 16-битный код — у моделей формата ch57x.
-    /// Null — устройство не найдено.
+    /// Подбирает драйвер подключённой плате: по USB ID и виду мультимедиа-интерфейса — битовый (только кнопки,
+    /// без значений) у CH552 6 клавиш + ручка, 16-битный код у моделей формата ch57x. Null — плата не найдена.
     /// </summary>
-    public static ProtocolMode? DetectProtocol()
+    public static DriverDef? DetectDriver()
     {
         foreach (var (vid, pid) in Supported)
         {
             var consumer = HidEnumerator.Enumerate(vid, pid).FirstOrDefault(d => d.UsagePage == 0x0C);
-            if (consumer != null) return consumer.InputValueCaps == 0 ? ProtocolMode.Direct : ProtocolMode.Legacy;
+            if (consumer != null && DriverStore.Match(vid, pid, consumer.InputValueCaps == 0) is { } driver) return driver;
         }
         return null;
     }
@@ -56,7 +55,7 @@ public sealed class MacroPadDevice : IDisposable
         {
             int error = Marshal.GetLastWin32Error();
             handle.Dispose();
-            throw new IOException($"Не удалось открыть устройство (код ошибки {error}).");
+            throw new IOException(L.F("device.openError", "Не удалось открыть устройство (код ошибки {0}).", error));
         }
         return new MacroPadDevice(handle, info);
     }
@@ -101,20 +100,20 @@ public sealed class MacroPadDevice : IDisposable
             {
                 int error = Marshal.GetLastWin32Error();
                 if (error != ERROR_IO_PENDING)
-                    throw new IOException($"Ошибка записи в устройство (код {error}).");
+                    throw new IOException(L.F("device.writeError", "Ошибка записи в устройство (код {0}).", error));
 
                 if (!completed.WaitOne(WriteTimeoutMs))
                 {
                     CancelIoEx(_handle, overlapped);
                     GetOverlappedResult(_handle, overlapped, out _, true);
-                    throw new TimeoutException("Устройство не отвечает (истекло время записи).");
+                    throw new TimeoutException(L.T("device.timeout", "Устройство не отвечает (истекло время записи)."));
                 }
             }
 
             if (!GetOverlappedResult(_handle, overlapped, out int written, false))
-                throw new IOException($"Ошибка записи в устройство (код {Marshal.GetLastWin32Error()}).");
+                throw new IOException(L.F("device.writeError", "Ошибка записи в устройство (код {0}).", Marshal.GetLastWin32Error()));
             if (written != report.Length)
-                throw new IOException($"Записано {written} из {report.Length} байт.");
+                throw new IOException(L.F("device.partial", "Записано {0} из {1} байт.", written, report.Length));
         }
         finally
         {

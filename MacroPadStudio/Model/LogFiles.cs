@@ -5,7 +5,7 @@ namespace OshiMakiKey.Model;
 /// <summary>Журналы в user_data. Файл открывается на совместную запись, чтобы монитор и мастер не мешали друг другу.</summary>
 public static class LogFiles
 {
-    public static string MonitorLog => Path.Combine(SettingsStore.Folder, "monitor.log");
+    public static string MonitorLog => Path.Combine(AppPaths.UserData, "monitor.log");
 
     /// <summary>Открывает журнал на дозапись. Null и текст ошибки — если открыть не удалось.</summary>
     public static StreamWriter? OpenAppend(string path, out string? error)
@@ -29,8 +29,8 @@ public static class LogFiles
     {
         try
         {
-            Directory.CreateDirectory(SettingsStore.Folder);
-            string path = Path.Combine(SettingsStore.Folder, $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            Directory.CreateDirectory(AppPaths.UserData);
+            string path = Path.Combine(AppPaths.UserData, $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllLines(path, lines, new UTF8Encoding(false));
             return path;
         }

@@ -11,9 +11,10 @@ internal static class Program
     /// <summary>
     /// Аргументы:
     ///   --tray               запуск свёрнутым в трей (используется автозапуском)
-    ///   --selftest файл      проверка протокола и модели, отчёт в файл
+    ///   --selftest файл      проверка протокола, модели и файлов ресурсов, отчёт в файл
     ///   --probe файл         поиск устройства и тестовое открытие, отчёт в файл
-    ///   --snapshot файл.png  снимок окна (для проверки интерфейса), с --select Key1|KnobLeft|… и --kind Keys|Media|Mouse|System
+    ///   --snapshot файл.png  снимок окна (для проверки интерфейса), с --select Key1|KnobLeft|… и --kind Keys|Media|Mouse|System,
+    ///                        --theme id и --lang код — только для этого снимка
     ///   --monitortest файл   открыть монитор, программно нажать F24 и сохранить журнал (проверка монитора)
     ///   --wizard-snapshot файл.png  снимок окна мастера подбора
     ///   --export-icon файл   сохранить иконку приложения в .ico
@@ -30,17 +31,26 @@ internal static class Program
         if (Arg("--selftest") is string testReport) return SelfTest.Run(testReport);
         if (Arg("--probe") is string probeReport) return SelfTest.Probe(probeReport);
 
+        if (Arg("--export-icon") is string iconPath)
+        {
+            File.WriteAllBytes(iconPath, Theme.BuildIconBytes());
+            return 0;
+        }
+
         ApplicationConfiguration.Initialize();
         Theme.Init();
+        var settings = SettingsStore.LoadSettings();
 
         if (Arg("--monitortest") is string monitorReport)
         {
+            LoadResources(settings);
             Application.Run(new MonitorForm(monitorReport));
             return 0;
         }
 
         if (Arg("--wizard-snapshot") is string wizardShot)
         {
+            LoadResources(settings);
             var wizard = new ProtocolWizardForm();
             wizard.Shown += async (_, _) =>
             {
@@ -54,23 +64,20 @@ internal static class Program
             return 0;
         }
 
-        if (Arg("--export-icon") is string iconPath)
-        {
-            File.WriteAllBytes(iconPath, Theme.BuildIconBytes());
-            return 0;
-        }
-
         if (Arg("--snapshot") is string snapshotPath)
         {
-            ControlId? select = Enum.TryParse<ControlId>(Arg("--select"), out var id) ? id : null;
-            var snapshotSettings = SettingsStore.Load();
             // Только в памяти: в режиме снимка настройки не сохраняются.
+            settings.Theme = Arg("--theme") ?? settings.Theme;
+            settings.Language = Arg("--lang") ?? settings.Language;
+            LoadResources(settings);
+            SettingsStore.AttachPresets(settings);
+            ControlId? select = Enum.TryParse<ControlId>(Arg("--select"), out var id) ? id : null;
             if (select is ControlId selected && Enum.TryParse<ActionKind>(Arg("--kind"), out var kind))
             {
-                snapshotSettings.Profile.Layers[0].Get(selected).Kind = kind;
-                snapshotSettings.EnsureTriggers();
+                settings.Profile.Layers[0].Get(selected).Kind = kind;
+                settings.EnsureTriggers();
             }
-            Application.Run(new MainForm(snapshotSettings, false, null, snapshotPath, select));
+            Application.Run(new MainForm(settings, false, null, snapshotPath, select));
             return 0;
         }
 
@@ -89,7 +96,38 @@ internal static class Program
         }
 
         using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
-        Application.Run(new MainForm(SettingsStore.Load(), args.Contains("--tray"), showEvent));
+        LoadResources(settings);
+        SettingsStore.AttachPresets(settings);
+
+        bool startHidden = args.Contains("--tray");
+        ReopenState? reopen = null;
+        while (true)
+        {
+            var form = new MainForm(settings, startHidden, showEvent, reopen: reopen);
+            Application.Run(form);
+            if (form.Reopen == null) break;
+
+            // Смена темы или языка, «Проверить файлы программы»: перечитать ресурсы и открыть окно заново.
+            reopen = form.Reopen;
+            startHidden = false;
+            Notices.Clear();
+            LoadResources(settings);
+            settings.Normalize();
+        }
         return 0;
+    }
+
+    /// <summary>
+    /// Языки, драйверы и темы из папок рядом с программой. Если каких-то файлов нет, работают встроенные
+    /// настройки, а в окне появится уведомление.
+    /// </summary>
+    static void LoadResources(AppSettings settings)
+    {
+        L.Load(settings.Language);
+        DriverStore.Load();
+        ThemeStore.Load();
+        ThemeStore.Apply(settings.Theme);
+        KeyCatalog.Rebuild();
+        MediaCatalog.Rebuild();
     }
 }

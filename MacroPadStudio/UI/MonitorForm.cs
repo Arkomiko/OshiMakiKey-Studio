@@ -13,7 +13,6 @@ namespace OshiMakiKey.UI;
 /// </summary>
 internal sealed class MonitorForm : Form
 {
-    const string DeviceTag = "VID_1189&PID_8890";
     const int MaxLines = 800;
 
     readonly ListBox _log = new();
@@ -29,7 +28,7 @@ internal sealed class MonitorForm : Form
     {
         _selfTestReport = selfTestReport;
 
-        Text = "Монитор нажатий — " + Branding.AppName;
+        Text = L.T("monitor.title", "Монитор нажатий") + " — " + Branding.AppName;
         Icon = Theme.AppIcon;
         Font = Theme.Body;
         BackColor = Theme.Surface;
@@ -44,9 +43,7 @@ internal sealed class MonitorForm : Form
         _hint.Height = Theme.S(78);
         _hint.Padding = new Padding(Theme.S(16), Theme.S(10), Theme.S(16), Theme.S(6));
         _hint.ForeColor = Theme.Text;
-        _hint.Text = "Нажимайте клавиши и крутите ручку макро-клавиатуры — её события отмечены ★. " +
-                     "Нажмите и клавишу на обычной клавиатуре: если она появилась здесь, монитор работает. " +
-                     "Журнал сохраняется в user_data\\monitor.log.";
+        _hint.Text = L.T("monitor.hint", "Нажимайте клавиши и крутите ручку макро-клавиатуры — её события отмечены ★. Нажмите и клавишу на обычной клавиатуре: если она появилась здесь, монитор работает. Журнал сохраняется в user_data\\monitor.log.");
 
         _log.Dock = DockStyle.Fill;
         _log.Font = new Font("Consolas", 10f);
@@ -66,16 +63,16 @@ internal sealed class MonitorForm : Form
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        _showOthers.Text = "Показывать и другие устройства";
+        _showOthers.Text = L.T("monitor.showOthers", "Показывать и другие устройства");
         _showOthers.AutoSize = true;
         _showOthers.Checked = true;
         _showOthers.Anchor = AnchorStyles.Left;
 
         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
-        buttons.Controls.Add(MakeButton("Очистить", (_, _) => _log.Items.Clear()));
-        buttons.Controls.Add(MakeButton("Копировать всё", (_, _) => CopyAll()));
-        buttons.Controls.Add(MakeButton("Открыть журнал", (_, _) => OpenLogFile()));
-        buttons.Controls.Add(MakeButton("Закрыть", (_, _) => Close()));
+        buttons.Controls.Add(MakeButton(L.T("monitor.clear", "Очистить"), (_, _) => _log.Items.Clear()));
+        buttons.Controls.Add(MakeButton(L.T("monitor.copy", "Копировать всё"), (_, _) => CopyAll()));
+        buttons.Controls.Add(MakeButton(L.T("monitor.openLog", "Открыть журнал"), (_, _) => OpenLogFile()));
+        buttons.Controls.Add(MakeButton(L.T("button.close", "Закрыть"), (_, _) => Close()));
         bottom.Controls.Add(_showOthers, 0, 0);
         bottom.Controls.Add(buttons, 1, 0);
 
@@ -87,13 +84,14 @@ internal sealed class MonitorForm : Form
         _deviceTimer.Tick += (_, _) =>
         {
             _deviceTimer.Stop();
-            Append("USB: состав устройств изменился");
+            Append(L.T("monitor.usbChanged", "USB: состав устройств изменился"));
             StartReaders();
         };
 
         _file = LogFiles.OpenAppend(_logPath, out string? logError);
-        Append($"──── Монитор открыт {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
-        if (logError != null) Append("Не удалось открыть monitor.log: " + logError);
+        Append(L.F("monitor.opened", "──── Монитор открыт {0:dd.MM.yyyy HH:mm:ss}, {1} {2}", DateTime.Now, Branding.AppName, Branding.Version));
+        if (logError != null) Append(L.F("monitor.logError", "Не удалось открыть monitor.log: {0}", logError));
+        Theme.ApplyTo(this);
     }
 
     static Button MakeButton(string text, EventHandler onClick)
@@ -104,24 +102,26 @@ internal sealed class MonitorForm : Form
             AutoSize = true,
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
             Padding = new Padding(Theme.S(8), Theme.S(2), Theme.S(8), Theme.S(2)),
             Margin = new Padding(Theme.S(8), 0, 0, 0),
             Cursor = Cursors.Hand,
         };
         button.FlatAppearance.BorderColor = Theme.Border;
+        button.FlatAppearance.MouseOverBackColor = Theme.Hover;
         button.Click += onClick;
         return button;
     }
 
     /// <summary>Записи от самой программы (например, что фоновый агент выполнил действие).</summary>
-    public void LogAgent(string text) => Append("Программа     " + text);
+    public void LogAgent(string text) => Append($"{L.T("monitor.program", "Программа"),-13} {text}");
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        if (RawInput.Register(Handle) is string error) Append("ОШИБКА подписки на ввод: " + error);
-        int padCollections = RawInput.DeviceNames().Count(n => n.Contains(DeviceTag, StringComparison.OrdinalIgnoreCase));
-        Append($"★ Raw Input видит коллекций макро-клавиатуры: {padCollections}");
+        if (RawInput.Register(Handle) is string error) Append(L.F("monitor.registerError", "ОШИБКА подписки на ввод: {0}", error));
+        int padCollections = RawInput.DeviceNames().Count(DriverStore.IsPadDeviceName);
+        Append(L.F("monitor.collections", "★ Raw Input видит коллекций макро-клавиатуры: {0}", padCollections));
         StartReaders();
     }
 
@@ -143,7 +143,7 @@ internal sealed class MonitorForm : Form
         RawInput.Unregister();
         StopReaders();
         _deviceTimer.Dispose();
-        Append("──── Монитор закрыт");
+        Append(L.T("monitor.closed", "──── Монитор закрыт"));
         _file?.Dispose();
         _file = null;
         base.OnFormClosed(e);
@@ -156,17 +156,18 @@ internal sealed class MonitorForm : Form
         var interfaces = MacroPadDevice.Supported.SelectMany(d => HidEnumerator.Enumerate(d.Vid, d.Pid)).ToList();
         if (interfaces.Count == 0)
         {
-            Append("★ Макро-клавиатура не подключена");
+            Append(L.T("monitor.notConnected", "★ Макро-клавиатура не подключена"));
             return;
         }
-        Append($"★ Макро-клавиатура подключена: интерфейсов {interfaces.Count}, способ записи — {MacroPadDevice.DetectProtocol()}");
+        Append(L.F("monitor.connected", "★ Макро-клавиатура подключена: интерфейсов {0}, драйвер — {1}",
+            interfaces.Count, MacroPadDevice.DetectDriver()?.Title ?? "—"));
         foreach (var info in interfaces.Where(i => i.UsagePage == 0x0C || (i.UsagePage == 0x01 && i.Usage == 0x00)))
         {
             try
             {
                 var reader = new HidInputReader(info);
                 reader.ReportReceived += (r, report) => BeginInvokeSafe(() =>
-                    Append($"★ {InterfaceName(r.Info),-12} сырой отчёт [{Convert.ToHexString(report)}]"));
+                    Append(L.F("monitor.rawReport", "★ {0,-12} сырой отчёт [{1}]", InterfaceName(r.Info), Convert.ToHexString(report))));
                 reader.Start();
                 _readers.Add(reader);
             }
@@ -183,7 +184,8 @@ internal sealed class MonitorForm : Form
         _readers.Clear();
     }
 
-    static string InterfaceName(HidDeviceInfo info) => info.UsagePage == 0x0C ? "Мультимедиа" : "Служебный";
+    static string InterfaceName(HidDeviceInfo info) =>
+        info.UsagePage == 0x0C ? L.T("monitor.media", "Мультимедиа") : L.T("monitor.service", "Служебный");
 
     void BeginInvokeSafe(Action action)
     {
@@ -206,7 +208,7 @@ internal sealed class MonitorForm : Form
         if (m.Msg == RawInput.WM_INPUT && RawInput.Read(m.LParam) is { } input)
         {
             string name = input.Device == IntPtr.Zero ? "" : RawInput.DeviceName(input.Device);
-            bool fromPad = name.Contains(DeviceTag, StringComparison.OrdinalIgnoreCase);
+            bool fromPad = DriverStore.IsPadDeviceName(name);
             if ((fromPad || _showOthers.Checked) && Describe(input) is string text)
                 Append((fromPad ? "★ " : "  ") + text + (fromPad ? "" : "   · " + SourceName(name)));
         }
@@ -221,19 +223,20 @@ internal sealed class MonitorForm : Form
     /// <summary>«046D:C52B» из имени устройства, «программно» для ввода, созданного программами.</summary>
     static string SourceName(string deviceName)
     {
-        if (deviceName.Length == 0) return "программно";
+        if (deviceName.Length == 0) return L.T("monitor.software", "программно");
         int vid = deviceName.IndexOf("VID_", StringComparison.OrdinalIgnoreCase);
         int pid = deviceName.IndexOf("PID_", StringComparison.OrdinalIgnoreCase);
         return vid >= 0 && pid >= 0 && vid + 8 <= deviceName.Length && pid + 8 <= deviceName.Length
             ? $"{deviceName.Substring(vid + 4, 4)}:{deviceName.Substring(pid + 4, 4)}".ToUpperInvariant()
-            : "другое устройство";
+            : L.T("monitor.otherDevice", "другое устройство");
     }
 
     static string? Describe(RawEvent input) => input switch
     {
-        RawKeyboardEvent key => $"Клавиатура   {KeyName(key.Key),-14} {(key.Up ? "отпущена" : "нажата  ")}   скан-код {(key.Extended ? "E0 " : "")}{key.MakeCode:X2}",
+        RawKeyboardEvent key => L.F("monitor.key", "Клавиатура   {0,-14} {1,-8}   скан-код {2}{3:X2}", KeyName(key.Key),
+            key.Up ? L.T("monitor.released", "отпущена") : L.T("monitor.pressed", "нажата"), key.Extended ? "E0 " : "", key.MakeCode),
         RawMouseEvent mouse => DescribeMouse(mouse),
-        RawHidEvent hid => $"{(hid.UsagePage == 0x01 ? "Система    " : "Мультимедиа")}  {DescribeUsages(hid)}   [{Convert.ToHexString(hid.Report)}]",
+        RawHidEvent hid => $"{(hid.UsagePage == 0x01 ? L.T("monitor.system", "Система") : L.T("monitor.media", "Мультимедиа")),-11}  {DescribeUsages(hid)}   [{Convert.ToHexString(hid.Report)}]",
         _ => null,
     };
 
@@ -243,29 +246,32 @@ internal sealed class MonitorForm : Form
         Keys.ShiftKey or Keys.LShiftKey or Keys.RShiftKey => "Shift",
         Keys.Menu or Keys.LMenu or Keys.RMenu => "Alt",
         Keys.LWin or Keys.RWin => "Win",
-        >= Keys.F13 and <= Keys.F24 => key + " (служ.)",
+        >= Keys.F13 and <= Keys.F24 => key + " " + L.T("monitor.serviceKey", "(служ.)"),
         >= Keys.D0 and <= Keys.D9 => ((char)key).ToString(),
         _ => key.ToString(),
     };
 
     static string DescribeUsages(RawHidEvent hid)
     {
-        if (hid.Usages.Length == 0) return "отпущено";
+        if (hid.Usages.Length == 0) return L.T("monitor.releasedAll", "отпущено");
         return string.Join(" + ", hid.Usages.Select(u => hid.UsagePage == 0x0C ? MediaCatalog.NameOf(u) : $"0x{u:X2}"));
     }
 
     static string? DescribeMouse(RawMouseEvent mouse)
     {
         var parts = new List<string>();
-        if ((mouse.ButtonFlags & 0x0001) != 0) parts.Add("левая нажата");
-        if ((mouse.ButtonFlags & 0x0002) != 0) parts.Add("левая отпущена");
-        if ((mouse.ButtonFlags & 0x0004) != 0) parts.Add("правая нажата");
-        if ((mouse.ButtonFlags & 0x0008) != 0) parts.Add("правая отпущена");
-        if ((mouse.ButtonFlags & 0x0010) != 0) parts.Add("средняя нажата");
-        if ((mouse.ButtonFlags & 0x0020) != 0) parts.Add("средняя отпущена");
-        if ((mouse.ButtonFlags & 0x0400) != 0) parts.Add($"колесо {(mouse.WheelDelta > 0 ? "вверх" : "вниз")} ({mouse.WheelDelta})");
+        if ((mouse.ButtonFlags & 0x0001) != 0) parts.Add(L.T("monitor.leftDown", "левая нажата"));
+        if ((mouse.ButtonFlags & 0x0002) != 0) parts.Add(L.T("monitor.leftUp", "левая отпущена"));
+        if ((mouse.ButtonFlags & 0x0004) != 0) parts.Add(L.T("monitor.rightDown", "правая нажата"));
+        if ((mouse.ButtonFlags & 0x0008) != 0) parts.Add(L.T("monitor.rightUp", "правая отпущена"));
+        if ((mouse.ButtonFlags & 0x0010) != 0) parts.Add(L.T("monitor.middleDown", "средняя нажата"));
+        if ((mouse.ButtonFlags & 0x0020) != 0) parts.Add(L.T("monitor.middleUp", "средняя отпущена"));
+        if ((mouse.ButtonFlags & 0x0400) != 0)
+            parts.Add(mouse.WheelDelta > 0
+                ? L.F("monitor.wheelUp", "колесо вверх ({0})", mouse.WheelDelta)
+                : L.F("monitor.wheelDown", "колесо вниз ({0})", mouse.WheelDelta));
         // Простое движение обычной мыши не показываем — иначе журнал утонет в нём.
-        return parts.Count == 0 ? null : "Мышь         " + string.Join(", ", parts);
+        return parts.Count == 0 ? null : $"{L.T("monitor.mouse", "Мышь"),-12} " + string.Join(", ", parts);
     }
 
     void Append(string text)

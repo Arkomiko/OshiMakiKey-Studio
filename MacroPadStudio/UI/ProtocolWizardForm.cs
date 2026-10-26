@@ -24,7 +24,6 @@ internal sealed class ProtocolWizardForm : Form
     static readonly ControlId[] KnobIds = { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight };
     static readonly ControlId[] AllControls = KeyIds.Concat(KnobIds).ToArray();
 
-    const string DeviceTag = "VID_1189&PID_8890";
     const int QuietMs = 700;
 
     readonly Label _title = new();
@@ -56,7 +55,7 @@ internal sealed class ProtocolWizardForm : Form
 
     public ProtocolWizardForm()
     {
-        Text = "Проверка записи — " + Branding.AppName;
+        Text = L.T("wizard.title", "Проверка записи") + " — " + Branding.AppName;
         Icon = Theme.AppIcon;
         Font = Theme.Body;
         BackColor = Theme.Surface;
@@ -93,7 +92,7 @@ internal sealed class ProtocolWizardForm : Form
         }
         _text.Font = Theme.Subtitle;
         _device.Font = Theme.Strong;
-        _received.ForeColor = Theme.AccentDark;
+        _received.ForeColor = Theme.AccentText;
 
         _log.Dock = DockStyle.Fill;
         _log.Font = new Font("Consolas", 9f);
@@ -121,7 +120,7 @@ internal sealed class ProtocolWizardForm : Form
         _replugSettle.Tick += (_, _) =>
         {
             _replugSettle.Stop();
-            Log("Плата переподключена");
+            Log(L.T("wizard.log.replugged", "Плата переподключена"));
             Next();
         };
 
@@ -131,10 +130,12 @@ internal sealed class ProtocolWizardForm : Form
         _steps.Add(new WriteStep());
         foreach (var control in AllControls) _steps.Add(new PressStep(control));
 
-        Log($"──── Проверка записи открыта {DateTime.Now:dd.MM.yyyy HH:mm:ss}, {Branding.AppName} {Branding.Version}");
-        if (logError != null) Log("Не удалось открыть monitor.log: " + logError + " — протокол сохранится отдельным файлом");
+        Log(L.F("wizard.log.opened", "──── Проверка записи открыта {0:dd.MM.yyyy HH:mm:ss}, {1} {2}", DateTime.Now, Branding.AppName, Branding.Version));
+        if (logError != null)
+            Log(L.F("wizard.log.logError", "Не удалось открыть monitor.log: {0} — протокол сохранится отдельным файлом", logError));
         ShowIntro();
         UpdateDeviceStatus();
+        Theme.ApplyTo(this);
     }
 
     static void StyleButton(Button button, bool primary)
@@ -146,7 +147,7 @@ internal sealed class ProtocolWizardForm : Form
         button.Margin = new Padding(Theme.S(8), 0, 0, 0);
         button.Padding = new Padding(Theme.S(10), 0, Theme.S(10), 0);
         button.BackColor = primary ? Theme.Accent : Theme.Surface;
-        button.ForeColor = primary ? Color.White : Theme.Text;
+        button.ForeColor = primary ? Theme.OnAccent : Theme.Text;
         button.FlatAppearance.BorderColor = primary ? Theme.Accent : Theme.Border;
         button.FlatAppearance.MouseOverBackColor = primary ? Theme.AccentDark : Theme.Hover;
     }
@@ -172,13 +173,11 @@ internal sealed class ProtocolWizardForm : Form
 
     void ShowIntro()
     {
-        _title.Text = "Проверка записи";
+        _title.Text = L.T("wizard.title", "Проверка записи");
         _progress.Text = "";
-        _text.Text = "Мастер запишет в клавиатуру тестовые буквы и попросит по очереди нажать каждую клавишу и ручку. " +
-                     "По буквам он поймёт, работает ли запись и какие номера у ручки на вашей плате.\n\n" +
-                     "Сначала нужно отключить и снова подключить USB-кабель — мастер это увидит сам. Около минуты.";
+        _text.Text = L.T("wizard.intro", "Мастер запишет в клавиатуру тестовые буквы и попросит по очереди нажать каждую клавишу и ручку. По буквам он поймёт, работает ли запись и какие номера у ручки на вашей плате.\n\nСначала нужно отключить и снова подключить USB-кабель — мастер это увидит сам. Около минуты.");
         _received.Text = "";
-        _primary.Text = "Начать";
+        _primary.Text = L.T("wizard.start", "Начать");
         _primary.Visible = true;
         _skip.Visible = false;
     }
@@ -194,8 +193,8 @@ internal sealed class ProtocolWizardForm : Form
         }
 
         var step = _steps[_index];
-        _title.Text = "Проверка записи";
-        _progress.Text = $"Шаг {_index + 1} из {_steps.Count}";
+        _title.Text = L.T("wizard.title", "Проверка записи");
+        _progress.Text = L.F("wizard.step", "Шаг {0} из {1}", _index + 1, _steps.Count);
         _received.Text = "";
         _primary.Visible = false;
 
@@ -204,18 +203,18 @@ internal sealed class ProtocolWizardForm : Form
             case PressStep press:
                 _captured.Clear();
                 _text.Text = PressPrompt(press.Control);
-                _skip.Text = "Ничего не происходит";
+                _skip.Text = L.T("wizard.nothing", "Ничего не происходит");
                 _skip.Visible = true;
                 break;
             case ReplugStep:
                 _sawRemoval = false;
-                _text.Text = "Отключите USB-кабель клавиатуры и подключите его снова.";
-                _skip.Text = "Пропустить";
+                _text.Text = L.T("wizard.replug", "Отключите USB-кабель клавиатуры и подключите его снова.");
+                _skip.Text = L.T("wizard.skip", "Пропустить");
                 _skip.Visible = true;
                 break;
             case WriteStep:
                 _skip.Visible = false;
-                _text.Text = "Записываю тестовые буквы…";
+                _text.Text = L.T("wizard.writing", "Записываю тестовые буквы…");
                 RunWrite();
                 break;
         }
@@ -223,10 +222,10 @@ internal sealed class ProtocolWizardForm : Form
 
     static string PressPrompt(ControlId control) => control switch
     {
-        ControlId.KnobLeft => "Поверните ручку ВЛЕВО на один щелчок.",
-        ControlId.KnobPress => "НАЖМИТЕ на ручку один раз.",
-        ControlId.KnobRight => "Поверните ручку ВПРАВО на один щелчок.",
-        _ => $"Нажмите клавишу {UiText.KeyNumber(control)} один раз.",
+        ControlId.KnobLeft => L.T("wizard.press.knobLeft", "Поверните ручку ВЛЕВО на один щелчок."),
+        ControlId.KnobPress => L.T("wizard.press.knobPress", "НАЖМИТЕ на ручку один раз."),
+        ControlId.KnobRight => L.T("wizard.press.knobRight", "Поверните ручку ВПРАВО на один щелчок."),
+        _ => L.F("wizard.press.key", "Нажмите клавишу {0} один раз.", UiText.KeyNumber(control)),
     };
 
     async void RunWrite()
@@ -234,7 +233,7 @@ internal sealed class ProtocolWizardForm : Form
         var device = MacroPadDevice.FindConfigInterface();
         if (device == null)
         {
-            Log("Клавиатура не подключена, запись пропущена");
+            Log(L.T("wizard.log.noDevice", "Клавиатура не подключена, запись пропущена"));
             Next();
             return;
         }
@@ -248,11 +247,12 @@ internal sealed class ProtocolWizardForm : Form
                 using var pad = MacroPadDevice.Open(device);
                 pad.Write(packets, sendInit: false);
             });
-            Log($"Записан прямой формат: кнопки {FirstProbeSlot}–{LastProbeSlot} → буквы a–u (кнопка 1 = a, 7 = g, 13 = m, 15 = o, 21 = u), кадров {packets.Count}");
+            Log(L.F("wizard.log.written", "Записан прямой формат: кнопки {0}–{1} → буквы a–u (кнопка 1 = a, 7 = g, 13 = m, 15 = o, 21 = u), кадров {2}",
+                FirstProbeSlot, LastProbeSlot, packets.Count));
         }
         catch (Exception ex)
         {
-            Log("Ошибка записи: " + ex.Message);
+            Log(L.F("wizard.log.writeError", "Ошибка записи: {0}", ex.Message));
         }
         finally
         {
@@ -265,8 +265,10 @@ internal sealed class ProtocolWizardForm : Form
     {
         _quiet.Stop();
         if (_index < 0 || _index >= _steps.Count || _steps[_index] is not PressStep press) return;
-        string slot = _slotSeen.TryGetValue(press.Control, out int s) ? $" [кнопка прошивки {s}, букв: {_letterCount.GetValueOrDefault(press.Control)}]" : "";
-        Log($"{UiText.Title(press.Control)} → {(_captured.Count == 0 ? "нет событий" : string.Join("  ", _captured))}{slot}");
+        string slot = _slotSeen.TryGetValue(press.Control, out int s)
+            ? " " + L.F("wizard.log.slot", "[кнопка прошивки {0}, букв: {1}]", s, _letterCount.GetValueOrDefault(press.Control))
+            : "";
+        Log($"{UiText.Title(press.Control)} → {(_captured.Count == 0 ? L.T("wizard.log.noEvents", "нет событий") : string.Join("  ", _captured))}{slot}");
         Next();
     }
 
@@ -278,21 +280,24 @@ internal sealed class ProtocolWizardForm : Form
         bool keysWork = KeyIds.Any(_slotSeen.ContainsKey);
         if (keysWork) Result = ProtocolMode.Direct;
         if (KnobIds.Any(_slotSeen.ContainsKey))
-            KnobSlots = KnobIds.Select((id, i) => _slotSeen.TryGetValue(id, out int s) ? s : 13 + i).ToList();
+        {
+            var defaults = DriverStore.FirstWith(ProtocolMode.Direct)?.KnobSlots ?? new List<int> { 11, 12, 13 };
+            KnobSlots = KnobIds.Select((id, i) => _slotSeen.TryGetValue(id, out int s) ? s : defaults[i]).ToList();
+        }
 
         string keys = string.Join(", ", KeyIds.Select(id => $"{UiText.KeyNumber(id)}→{(_slotSeen.TryGetValue(id, out int s) ? s.ToString() : "—")}"));
         string knob = string.Join(", ", KnobIds.Select(id => $"{UiText.Glyph(id)}→{(_slotSeen.TryGetValue(id, out int s) ? s.ToString() : "—")}"));
-        Log($"Итог: запись {(keysWork ? "работает" : "не сработала")}; номера клавиш {keys}; номера ручки {knob}");
-        string saved = SaveProtocol() is string path ? $"Протокол сохранён: user_data\\{Path.GetFileName(path)}." : "";
+        Log(L.F("wizard.log.summary", "Итог: запись {0}; номера клавиш {1}; номера ручки {2}",
+            keysWork ? L.T("wizard.log.works", "работает") : L.T("wizard.log.failed", "не сработала"), keys, knob));
+        string saved = SaveProtocol() is string path ? L.F("wizard.saved", "Протокол сохранён: user_data\\{0}.", Path.GetFileName(path)) : "";
 
-        _title.Text = keysWork ? "Запись работает!" : "Запись не сработала";
+        _title.Text = keysWork ? L.T("wizard.works", "Запись работает!") : L.T("wizard.failed", "Запись не сработала");
         _progress.Text = "";
         _text.Text = keysWork
-            ? $"Клавиши отвечают тестовыми буквами. Номера ручки: {knob}.\n\n" +
-              $"Нажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки.\n\n{saved}"
-            : $"Клавиши не прислали тестовых букв. Всё, что прислала клавиатура, записано — этого хватит, чтобы разобраться дальше.\n\n{saved}";
+            ? L.F("wizard.works.text", "Клавиши отвечают тестовыми буквами. Номера ручки: {0}.\n\nНажмите «Готово» — программа сохранит этот способ и предложит записать ваши настройки.\n\n{1}", knob, saved)
+            : L.F("wizard.failed.text", "Клавиши не прислали тестовых букв. Всё, что прислала клавиатура, записано — этого хватит, чтобы разобраться дальше.\n\n{0}", saved);
         _received.Text = "";
-        _primary.Text = keysWork ? "Готово" : "Закрыть";
+        _primary.Text = keysWork ? L.T("wizard.done", "Готово") : L.T("button.close", "Закрыть");
         _primary.Visible = true;
         _skip.Visible = false;
     }
@@ -315,7 +320,7 @@ internal sealed class ProtocolWizardForm : Form
     void OnSkip()
     {
         if (_busy || _index < 0 || _index >= _steps.Count) return;
-        if (_steps[_index] is ReplugStep) Log("Переподключение пропущено");
+        if (_steps[_index] is ReplugStep) Log(L.T("wizard.log.replugSkipped", "Переподключение пропущено"));
         if (_steps[_index] is PressStep) FinishPress();
         else Next();
     }
@@ -325,7 +330,7 @@ internal sealed class ProtocolWizardForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        if (RawInput.Register(Handle) is string error) Log("ОШИБКА подписки на ввод: " + error);
+        if (RawInput.Register(Handle) is string error) Log(L.F("monitor.registerError", "ОШИБКА подписки на ввод: {0}", error));
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
@@ -333,7 +338,7 @@ internal sealed class ProtocolWizardForm : Form
         RawInput.Unregister();
         _quiet.Dispose();
         _replugSettle.Dispose();
-        Log("──── Проверка записи закрыта");
+        Log(L.T("wizard.log.closed", "──── Проверка записи закрыта"));
         // Мастер закрыли раньше итога — протокол всё равно сохраняем.
         if (_savedPath == null && _started) SaveProtocol();
         _file?.Dispose();
@@ -359,7 +364,7 @@ internal sealed class ProtocolWizardForm : Form
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == RawInput.WM_INPUT && RawInput.Read(m.LParam) is { } input && input.Device != IntPtr.Zero &&
-            RawInput.DeviceName(input.Device).Contains(DeviceTag, StringComparison.OrdinalIgnoreCase))
+            DriverStore.IsPadDeviceName(RawInput.DeviceName(input.Device)))
         {
             OnPadInput(input);
         }
@@ -374,9 +379,10 @@ internal sealed class ProtocolWizardForm : Form
     {
         string? text = input switch
         {
-            RawKeyboardEvent key => $"{key.Key}:{(key.Up ? "отпущена" : "нажата")}",
-            RawHidEvent hid => hid.Report.Any(b => b != 0) ? $"мм[{Convert.ToHexString(hid.Report)}]" : "мм0",
-            RawMouseEvent mouse when mouse.ButtonFlags != 0 => $"мышь{mouse.ButtonFlags:X4}{(mouse.WheelDelta != 0 ? $"({mouse.WheelDelta})" : "")}",
+            RawKeyboardEvent key => $"{key.Key}:{(key.Up ? L.T("monitor.released", "отпущена") : L.T("monitor.pressed", "нажата"))}",
+            RawHidEvent hid => L.T("wizard.token.media", "мм") + (hid.Report.Any(b => b != 0) ? $"[{Convert.ToHexString(hid.Report)}]" : "0"),
+            RawMouseEvent mouse when mouse.ButtonFlags != 0 =>
+                L.T("wizard.token.mouse", "мышь") + $"{mouse.ButtonFlags:X4}{(mouse.WheelDelta != 0 ? $"({mouse.WheelDelta})" : "")}",
             _ => null,
         };
         if (text == null) return;
@@ -384,7 +390,7 @@ internal sealed class ProtocolWizardForm : Form
         if (_index >= 0 && _index < _steps.Count && _steps[_index] is PressStep press)
         {
             _captured.Add(text);
-            _received.Text = "Получено: " + string.Join("  ", _captured.TakeLast(12));
+            _received.Text = L.F("wizard.received", "Получено: {0}", string.Join("  ", _captured.TakeLast(12)));
             _quiet.Stop();
             _quiet.Start();
             if (input is RawKeyboardEvent { Up: false } down && SlotForCode(KeyCatalog.FromVirtualKey(down.Key)) is int slot)
@@ -395,7 +401,7 @@ internal sealed class ProtocolWizardForm : Form
         }
         else
         {
-            Log("вне шага: " + text);
+            Log(L.F("wizard.log.outside", "вне шага: {0}", text));
         }
     }
 
@@ -407,8 +413,8 @@ internal sealed class ProtocolWizardForm : Form
         if (!connected && !_sawRemoval)
         {
             _sawRemoval = true;
-            Log("Плата отключена");
-            _text.Text = "Теперь подключите кабель обратно.";
+            Log(L.T("wizard.log.unplugged", "Плата отключена"));
+            _text.Text = L.T("wizard.plugBack", "Теперь подключите кабель обратно.");
         }
         else if (connected && _sawRemoval && !_replugSettle.Enabled)
         {
@@ -420,13 +426,13 @@ internal sealed class ProtocolWizardForm : Form
     void UpdateDeviceStatus()
     {
         bool connected = MacroPadDevice.FindConfigInterface() != null;
-        _device.Text = connected ? "● Клавиатура подключена" : "○ Клавиатура отключена";
+        _device.Text = connected ? L.T("wizard.connected", "● Клавиатура подключена") : L.T("wizard.disconnected", "○ Клавиатура отключена");
         _device.ForeColor = connected ? Theme.Success : Theme.Danger;
     }
 
     void Log(string text)
     {
-        string line = $"{DateTime.Now:HH:mm:ss.fff}  Мастер  {text}";
+        string line = $"{DateTime.Now:HH:mm:ss.fff}  {L.T("wizard.log.prefix", "Мастер")}  {text}";
         _log.Items.Add(line);
         _log.TopIndex = Math.Max(0, _log.Items.Count - 1);
         try

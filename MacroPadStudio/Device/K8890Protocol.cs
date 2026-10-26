@@ -55,7 +55,7 @@ public static class K8890Protocol
             case KeysAction keys:
             {
                 if (keys.Presses.Count > MaxPresses)
-                    throw new ArgumentException($"Не больше {MaxPresses} нажатий подряд.", nameof(action));
+                    throw new ArgumentException(L.F("protocol.tooManyPresses", "Не больше {0} нажатий подряд.", MaxPresses), nameof(action));
 
                 byte count = (byte)keys.Presses.Count;
                 // Прошивка ожидает «пустое» нажатие с индексом 0 перед реальными.
@@ -77,7 +77,7 @@ public static class K8890Protocol
                 packets.Add(Packet(0x03, key, (byte)(layerBits | 0x03), 0, 0, 0, unchecked((byte)wheel.Delta), wheel.Modifier));
                 break;
             default:
-                throw new ArgumentException("Неизвестный тип действия.", nameof(action));
+                throw new ArgumentException(L.T("protocol.unknownAction", "Неизвестный тип действия."), nameof(action));
         }
 
         packets.Add(Packet(0x03, 0xAA, 0xAA));

@@ -82,7 +82,7 @@ public sealed class Profile
 {
     public const int MaxLayers = 3;
 
-    public string Name { get; set; } = "Мой профиль";
+    public string Name { get; set; } = "";
     public List<Layer> Layers { get; set; } = new();
 
     public static Profile CreateDefault()
@@ -105,7 +105,7 @@ public sealed class Profile
     /// <summary>Чинит данные после загрузки из файла: все слои и кнопки на месте, значения в допустимых пределах.</summary>
     public void Normalize()
     {
-        Name ??= "Мой профиль";
+        Name ??= "";
         Layers ??= new();
         Layers.RemoveAll(l => l == null);
         while (Layers.Count < MaxLayers) Layers.Add(new Layer());
@@ -182,7 +182,23 @@ public sealed class Profile
 
 public sealed class AppSettings
 {
+    /// <summary>Раскладка активного пресета (хранится в user_data/presets, а не в settings.json).</summary>
+    [JsonIgnore]
     public Profile Profile { get; set; } = Profile.CreateDefault();
+
+    /// <summary>Раскладка из settings.json старой версии — переносится в пресет при первом запуске.</summary>
+    [JsonPropertyName("Profile")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Profile? LegacyProfile { get; set; }
+
+    /// <summary>Название активного пресета (имя файла в user_data/presets).</summary>
+    public string? ActivePreset { get; set; }
+
+    /// <summary>Идентификатор темы из папки theme.</summary>
+    public string? Theme { get; set; }
+
+    /// <summary>Код языка из папки language.</summary>
+    public string? Language { get; set; }
 
     /// <summary>Сколько слоёв записывать в устройство (у большинства небольших моделей — один).</summary>
     public int LayerCount { get; set; } = 1;
@@ -193,31 +209,45 @@ public sealed class AppSettings
     /// <summary>Хэш последней успешно записанной в устройство конфигурации.</summary>
     public string? LastWrittenSignature { get; set; }
 
-    /// <summary>Способ записи, выбранный пользователем (Auto — определить по устройству).</summary>
+    /// <summary>Драйвер, выбранный вручную; null — определять по подключённой плате.</summary>
+    public string? DriverId { get; set; }
+
+    /// <summary>Драйвер, подобранный по плате при последнем подключении.</summary>
+    public string? DetectedDriverId { get; set; }
+
+    /// <summary>Номера кнопок ручки, найденные мастером проверки записи, — отдельно для каждого драйвера.</summary>
+    public Dictionary<string, List<int>>? LearnedKnobSlots { get; set; }
+
+    // Поля прежних версий: читаются для переноса настроек, обратно не записываются.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public ProtocolMode Protocol { get; set; } = ProtocolMode.Auto;
 
-    /// <summary>Что определилось по подключённому устройству в последний раз.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProtocolMode? DetectedProtocol { get; set; }
 
-    public ProtocolMode EffectiveProtocol =>
-        Protocol != ProtocolMode.Auto ? Protocol : DetectedProtocol ?? ProtocolMode.Direct;
-
-    /// <summary>
-    /// Номера кнопок ручки в прошивке: поворот влево, нажатие, поворот вправо. По умолчанию для прямого формата —
-    /// 11, 12, 13 (измерено на CH552 6 клавиш + ручка), для остальных — как у ch57x-keyboard-tool (13, 14, 15).
-    /// Мастер проверки записи заменяет их найденными на конкретной плате.
-    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<int>? KnobSlots { get; set; }
 
+    [JsonIgnore]
+    public DriverDef EffectiveDriver => DriverStore.Find(DriverId) ?? DriverStore.Find(DetectedDriverId) ?? DriverStore.Default;
+
+    [JsonIgnore]
+    public ProtocolMode EffectiveProtocol => EffectiveDriver.Protocol;
+
+    /// <summary>Номер кнопки в прошивке: из драйвера, для ручки — с учётом найденного мастером.</summary>
     public byte SlotOf(ControlId control)
     {
+        var driver = EffectiveDriver;
         int knob = Array.IndexOf(new[] { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight }, control);
-        if (knob < 0) return (byte)(control - ControlId.Key1 + 1);
-        if (KnobSlots is { Count: 3 } slots && slots[knob] is > 0 and < 0xA0) return (byte)slots[knob];
-        return (byte)((EffectiveProtocol == ProtocolMode.Direct ? 11 : 13) + knob);
+        if (knob < 0) return (byte)driver.KeySlots[control - ControlId.Key1];
+        if (LearnedKnobSlots != null && LearnedKnobSlots.TryGetValue(driver.Id, out var learned) &&
+            learned is { Count: 3 } && learned[knob] is > 0 and < 0xA0)
+            return (byte)learned[knob];
+        return (byte)driver.KnobSlots[knob];
     }
 
     /// <summary>Слои есть только в формате ch57x — для остальных записывается только первый.</summary>
+    [JsonIgnore]
     public int EffectiveLayerCount => EffectiveProtocol == ProtocolMode.Legacy ? LayerCount : 1;
 
     public bool NeedsAgent(PadAction action) => Execution.NeedsAgent(action, EffectiveProtocol);
@@ -229,7 +259,20 @@ public sealed class AppSettings
         Profile ??= Profile.CreateDefault();
         Profile.Normalize();
         LayerCount = Math.Clamp(LayerCount, 1, Profile.MaxLayers);
-        if (DetectedProtocol == ProtocolMode.Auto) DetectedProtocol = null;
+
+        // Перенос из версий, где вместо драйверов был выбор способа записи.
+        if (DriverId == null && Protocol != ProtocolMode.Auto) DriverId = DriverStore.FirstWith(Protocol)?.Id;
+        if (DetectedDriverId == null && DetectedProtocol is ProtocolMode detected and not ProtocolMode.Auto)
+            DetectedDriverId = DriverStore.FirstWith(detected)?.Id;
+        if (KnobSlots is { Count: 3 } && DriverStore.FirstWith(ProtocolMode.Direct) is { } direct)
+        {
+            LearnedKnobSlots ??= new();
+            LearnedKnobSlots.TryAdd(direct.Id, KnobSlots);
+        }
+        Protocol = ProtocolMode.Auto;
+        DetectedProtocol = null;
+        KnobSlots = null;
+
         EnsureTriggers();
     }
 }

@@ -13,7 +13,8 @@
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
     <Product>OshiMakiKey Studio</Product>
     <Description>Настройка макро-клавиатуры CH552 (6 клавиш + ручка)</Description>
-    <Version>1.4.0</Version>
+    <Version>0.1.4</Version>
+    <InformationalVersion>0.1.4b</InformationalVersion>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 

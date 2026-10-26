@@ -17,7 +17,7 @@ Portable-программа для настройки китайских мак�
 
 ## Запуск
 
-`OshiMakiKeyStudio.exe` в корне проекта. Нужен .NET 8 Desktop Runtime.
+Версия **0.1.4b**. `OshiMakiKeyStudio.exe` в корне проекта. Нужен .NET 8 Desktop Runtime.
 
 При первом запуске открывается **мастер**: язык → тема → плата (с проверкой записи для плат прямого формата), затем **тур по окну** — подсвечивает области и объясняет, что они делают (**Справка → Как это работает**, F1).
 
@@ -96,7 +96,7 @@ OshiMakiKeyStudio.exe           готовая программа (portable)
 drivers/ theme/ language/       ресурсы программы (см. «Папки программы»)
 tools/lang-keys.ps1             сборка language/ru.json из кода и проверка переводов
 docs/drafts/                    черновики идей, ещё не реализованных
-OshiMakiKey-Studio.code-workspace, .vscode/   рабочая область, запуск и задачи VS Code
+.vscode/                        рабочая область (OshiMakiKey-Studio.code-workspace), запуск и задачи VS Code
 MacroPadStudio/                 исходники; проект — OshiMakiKeyStudio.csproj
   Device/   *Protocol.cs        форматы записи: прямой, k8890, v0, k884x, k8850
             ProfileCompiler.cs  пресет → кадры
@@ -117,7 +117,7 @@ MacroPadStudio/                 исходники; проект — OshiMakiKey
 dotnet build MacroPadStudio
 ```
 
-В VS Code откройте `OshiMakiKey-Studio.code-workspace`: там готовые конфигурации запуска (обычный, в трее, служба, снимок окна, самопроверка) и задачи (сборка, публикация, проверка переводов).
+В VS Code откройте `.vscode/OshiMakiKey-Studio.code-workspace`: там готовые конфигурации запуска (обычный, в трее, служба, снимок окна, самопроверка) и задачи (сборка, публикация, проверка переводов).
 
 После правки текстов в коде пересоберите русский пакет и проверьте переводы:
 

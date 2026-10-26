@@ -1,6 +1,6 @@
 {
   "folders": [
-    { "name": "OshiMakiKey Studio", "path": "." }
+    { "name": "OshiMakiKey Studio", "path": "../" }
   ],
   "settings": {
     "files.encoding": "utf8",
@@ -14,7 +14,6 @@
       "**/bin": true,
       "**/obj": true
     },
-    "dotnet.defaultSolution": "MacroPadStudio/OshiMakiKeyStudio.csproj",
     "[csharp]": { "editor.tabSize": 4, "editor.insertSpaces": true },
     "[json]": { "editor.tabSize": 2 }
   },

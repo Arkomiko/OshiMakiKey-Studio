@@ -4,7 +4,7 @@ namespace OshiMakiKey;
 internal static class Branding
 {
     public const string AppName = "OshiMakiKey Studio";
-    public const string Version = "1.4";
+    public const string Version = "0.1.4b";
 
     /// <summary>Имя для автозапуска и системных объектов (мьютекс одного экземпляра и т.п.).</summary>
     public const string InternalName = "OshiMakiKeyStudio";

@@ -27,26 +27,18 @@ public static class K8890Protocol
     public const int PacketSize = 64;
     public const int MaxPresses = 5;
 
-    public static byte KeyId(ControlId control) => control switch
-    {
-        // Клавиши нумеруются с 1 построчно: верхний ряд 1–3, нижний 4–6.
-        >= ControlId.Key1 and <= ControlId.Key6 => (byte)(control - ControlId.Key1 + 1),
-        // Ручки нумеруются после 12 клавиш: 13 + 3*номер_ручки + (влево=0, нажатие=1, вправо=2).
-        ControlId.KnobLeft => 13,
-        ControlId.KnobPress => 14,
-        ControlId.KnobRight => 15,
-        _ => throw new ArgumentOutOfRangeException(nameof(control)),
-    };
-
     /// <summary>Пустой пакет, который отправляется сразу после открытия устройства.</summary>
     public static byte[] InitPacket() => new byte[PacketSize];
 
-    /// <summary>Пакеты, назначающие действие кнопке. <paramref name="layer"/> — с нуля.</summary>
-    public static List<byte[]> Bind(int layer, ControlId control, HardwareAction action)
+    /// <summary>
+    /// Пакеты, назначающие действие кнопке прошивки <paramref name="key"/>: клавиши нумеруются с 1 построчно,
+    /// ручки — после 12 клавиш: 13 + 3 × номер ручки + (влево 0, нажатие 1, вправо 2). <paramref name="layer"/> — с нуля.
+    /// </summary>
+    public static List<byte[]> Bind(int layer, byte key, HardwareAction action)
     {
-        if (layer is < 0 or > 15) throw new ArgumentOutOfRangeException(nameof(layer));
+        // Номер слоя занимает старшую половину байта: 0–14.
+        if (layer is < 0 or > 14) throw new ArgumentOutOfRangeException(nameof(layer));
 
-        byte key = KeyId(control);
         byte layerBits = (byte)((layer + 1) << 4);
         var packets = new List<byte[]> { Packet(0x03, 0xFE, (byte)(layer + 1), 0x01, 0x01) };
 

@@ -74,6 +74,13 @@ internal static class Theme
     public static readonly Font Symbol = new("Segoe UI Symbol", 12f);
     public static readonly Font SymbolSmall = new("Segoe UI Symbol", 10f);
 
+    static readonly bool HasIconFont = FontFamily.Families.Any(f => f.Name == "Segoe MDL2 Assets");
+
+    /// <summary>Шрифт значков Windows 10 (Segoe MDL2 Assets), без него — обычные символы.</summary>
+    public static readonly Font IconFont = HasIconFont ? new Font("Segoe MDL2 Assets", 11f) : new Font("Segoe UI Symbol", 11f);
+
+    public static string IconGlyph(string mdl2, string fallback) => HasIconFont ? mdl2 : fallback;
+
     static Theme() => Apply(new ThemeDef());
 
     /// <summary>Вызывается после включения DPI-режима, чтобы размеры в пикселях масштабировались под экран.</summary>

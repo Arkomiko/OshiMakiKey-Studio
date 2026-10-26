@@ -1,0 +1,38 @@
+{
+  "id": "mini-keyboard-v0-3keys-knob",
+  "name": {
+    "ru": "Mini Keyboard · 3 клавиши + ручка (v0)",
+    "be": "Mini Keyboard · 3 клавішы + ручка (v0)",
+    "uk": "Mini Keyboard · 3 клавіші + ручка (v0)",
+    "kk": "Mini Keyboard · 3 перне + тұтқа (v0)",
+    "zh": "Mini Keyboard · 3 键 + 旋钮 (v0)",
+    "ja": "Mini Keyboard · 3キー + ノブ (v0)",
+    "en": "Mini Keyboard · 3 keys + knob (v0)",
+    "de": "Mini Keyboard · 3 Tasten + Drehknopf (v0)"
+  },
+  "usb": [
+    "1189:8890"
+  ],
+  "autoDetect": false,
+  "protocol": "Vendor",
+  "layout": {
+    "rows": 1,
+    "columns": 3,
+    "knobs": 1
+  },
+  "icon": {
+    "body": "#A1A1AA",
+    "keys": "#FFFFFF",
+    "accent": "#818CF8"
+  },
+  "notes": {
+    "ru": "«Версия 0» официальной программы для плат без Report ID. Только вручную.",
+    "be": "«Версія 0» афіцыйнай праграмы для плат без Report ID. Толькі ўручную.",
+    "uk": "«Версія 0» офіційної програми для плат без Report ID. Лише вручну.",
+    "kk": "Report ID жоқ тақталарға арналған ресми бағдарламаның «0 нұсқасы». Тек қолмен.",
+    "zh": "官方程序的“版本 0”，用于没有 Report ID 的设备。仅手动选择。",
+    "ja": "Report ID のないボード向けの公式ソフト「バージョン 0」。手動選択のみ。",
+    "en": "Official software “version 0” for boards without a report ID. Manual choice only.",
+    "de": "„Version 0“ der offiziellen Software für Platinen ohne Report-ID. Nur manuell."
+  }
+}

@@ -1,12 +1,38 @@
 {
   "id": "mini-keyboard-v0",
-  "name": { "ru": "Mini Keyboard · формат официальной программы", "en": "Mini Keyboard · official software format" },
-  "vendorId": "1189",
-  "productId": "8890",
-  "consumerBitfield": null,
+  "name": {
+    "ru": "Mini Keyboard · 6 клавиш + ручка (v0)",
+    "be": "Mini Keyboard · 6 клавіш + ручка (v0)",
+    "uk": "Mini Keyboard · 6 клавіш + ручка (v0)",
+    "kk": "Mini Keyboard · 6 перне + тұтқа (v0)",
+    "zh": "Mini Keyboard · 6 键 + 旋钮 (v0)",
+    "ja": "Mini Keyboard · 6キー + ノブ (v0)",
+    "en": "Mini Keyboard · 6 keys + knob (v0)",
+    "de": "Mini Keyboard · 6 Tasten + Drehknopf (v0)"
+  },
+  "usb": [
+    "1189:8890"
+  ],
   "autoDetect": false,
   "protocol": "Vendor",
-  "keySlots": [1, 2, 3, 4, 5, 6],
-  "knobSlots": [13, 14, 15],
-  "notes": "«Версия 0» официальной программы для плат без Report ID (по коду rOzzy1987/MacroPad). Только вручную."
+  "layout": {
+    "rows": 2,
+    "columns": 3,
+    "knobs": 1
+  },
+  "icon": {
+    "body": "#9CA3AF",
+    "keys": "#FFFFFF",
+    "accent": "#6366F1"
+  },
+  "notes": {
+    "ru": "«Версия 0» официальной программы для плат без Report ID. Только вручную.",
+    "be": "«Версія 0» афіцыйнай праграмы для плат без Report ID. Толькі ўручную.",
+    "uk": "«Версія 0» офіційної програми для плат без Report ID. Лише вручну.",
+    "kk": "Report ID жоқ тақталарға арналған ресми бағдарламаның «0 нұсқасы». Тек қолмен.",
+    "zh": "官方程序的“版本 0”，用于没有 Report ID 的设备。仅手动选择。",
+    "ja": "Report ID のないボード向けの公式ソフト「バージョン 0」。手動選択のみ。",
+    "en": "Official software “version 0” for boards without a report ID. Manual choice only.",
+    "de": "„Version 0“ der offiziellen Software für Platinen ohne Report-ID. Nur manuell."
+  }
 }

@@ -15,9 +15,9 @@ public static class VendorProtocol
 {
     public static byte[] WriteFlash() => Packet(0xAA, 0xAA);
 
-    public static List<byte[]> Bind(ControlId control, HardwareAction action)
+    /// <summary>Кадры для кнопки прошивки <paramref name="id"/> (нумерация как в k8890: клавиши с 1, ручки с 13).</summary>
+    public static List<byte[]> Bind(byte id, HardwareAction action)
     {
-        byte id = K8890Protocol.KeyId(control);
         var frames = new List<byte[]>();
         switch (action)
         {

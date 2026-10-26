@@ -1,12 +1,39 @@
 {
   "id": "ch57x-k8890",
-  "name": { "ru": "CH57x · формат ch57x-keyboard-tool", "en": "CH57x · ch57x-keyboard-tool format" },
-  "vendorId": "1189",
-  "productId": "8890",
+  "name": {
+    "ru": "CH57x · 6 клавиш + ручка (k8890)",
+    "be": "CH57x · 6 клавіш + ручка (k8890)",
+    "uk": "CH57x · 6 клавіш + ручка (k8890)",
+    "kk": "CH57x · 6 перне + тұтқа (k8890)",
+    "zh": "CH57x · 6 键 + 旋钮 (k8890)",
+    "ja": "CH57x · 6キー + ノブ (k8890)",
+    "en": "CH57x · 6 keys + knob (k8890)",
+    "de": "CH57x · 6 Tasten + Drehknopf (k8890)"
+  },
+  "usb": [
+    "1189:8890"
+  ],
   "consumerBitfield": false,
   "autoDetect": true,
   "protocol": "Legacy",
-  "keySlots": [1, 2, 3, 4, 5, 6],
-  "knobSlots": [13, 14, 15],
-  "notes": "Формат k8890 из kriomant/ch57x-keyboard-tool: прошивка сама разбирает клавиши, мультимедиа и мышь, есть слои."
+  "layout": {
+    "rows": 2,
+    "columns": 3,
+    "knobs": 1
+  },
+  "icon": {
+    "body": "#1F2023",
+    "keys": "#D6D3D1",
+    "accent": "#F97316"
+  },
+  "notes": {
+    "ru": "Формат k8890 (ch57x-keyboard-tool): клавиши, мультимедиа и мышь хранит сама плата, есть слои.",
+    "be": "Фармат k8890 (ch57x-keyboard-tool): клавішы, мультымедыя і мыш захоўвае сама плата, ёсць слаі.",
+    "uk": "Формат k8890 (ch57x-keyboard-tool): клавіші, мультимедіа й мишу зберігає сама плата, є шари.",
+    "kk": "k8890 пішімі (ch57x-keyboard-tool): пернелерді, мультимедиа мен тінтуірді тақтаның өзі сақтайды, қабаттар бар.",
+    "zh": "k8890 格式（ch57x-keyboard-tool）：按键、多媒体和鼠标都保存在设备中，支持多层。",
+    "ja": "k8890 形式（ch57x-keyboard-tool）：キー、メディア、マウスはボード自体に保存され、レイヤーに対応します。",
+    "en": "k8890 format (ch57x-keyboard-tool): keys, media and mouse are stored on the board, layers supported.",
+    "de": "k8890-Format (ch57x-keyboard-tool): Tasten, Medien und Maus speichert die Platine selbst, mit Ebenen."
+  }
 }

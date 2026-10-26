@@ -1,0 +1,38 @@
+{
+  "id": "ch57x-k8850-16keys",
+  "name": {
+    "ru": "CH57x · 16 клавиш (k8850)",
+    "be": "CH57x · 16 клавіш (k8850)",
+    "uk": "CH57x · 16 клавіш (k8850)",
+    "kk": "CH57x · 16 перне (k8850)",
+    "zh": "CH57x · 16 键 (k8850)",
+    "ja": "CH57x · 16キー (k8850)",
+    "en": "CH57x · 16 keys (k8850)",
+    "de": "CH57x · 16 Tasten (k8850)"
+  },
+  "usb": [
+    "514C:8850"
+  ],
+  "autoDetect": true,
+  "protocol": "K8850",
+  "layout": {
+    "rows": 4,
+    "columns": 4,
+    "knobs": 0
+  },
+  "icon": {
+    "body": "#14532D",
+    "keys": "#DCFCE7",
+    "accent": "#4ADE80"
+  },
+  "notes": {
+    "ru": "Формат k8850 (ch57x-keyboard-tool) для сетки 4×4. Не проверен на реальной плате.",
+    "be": "Фармат k8850 (ch57x-keyboard-tool) для сеткі 4×4. Не правераны на сапраўднай плаце.",
+    "uk": "Формат k8850 (ch57x-keyboard-tool) для сітки 4×4. Не перевірено на справжній платі.",
+    "kk": "4×4 торына арналған k8850 пішімі (ch57x-keyboard-tool). Нақты тақтада тексерілмеген.",
+    "zh": "用于 4×4 键盘的 k8850 格式（ch57x-keyboard-tool）。尚未在实物上验证。",
+    "ja": "4×4 配列用の k8850 形式（ch57x-keyboard-tool）。実機では未検証です。",
+    "en": "k8850 format (ch57x-keyboard-tool) for the 4×4 grid. Not verified on real hardware.",
+    "de": "k8850-Format (ch57x-keyboard-tool) für das 4×4-Raster. Nicht an echter Hardware geprüft."
+  }
+}

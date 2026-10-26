@@ -1,0 +1,39 @@
+{
+  "id": "ch552-3keys-knob",
+  "name": {
+    "ru": "CH552 · 3 клавиши + ручка",
+    "be": "CH552 · 3 клавішы + ручка",
+    "uk": "CH552 · 3 клавіші + ручка",
+    "kk": "CH552 · 3 перне + тұтқа",
+    "zh": "CH552 · 3 键 + 旋钮",
+    "ja": "CH552 · 3キー + ノブ",
+    "en": "CH552 · 3 keys + knob",
+    "de": "CH552 · 3 Tasten + Drehknopf"
+  },
+  "usb": [
+    "1189:8890"
+  ],
+  "consumerBitfield": true,
+  "autoDetect": false,
+  "protocol": "Direct",
+  "layout": {
+    "rows": 1,
+    "columns": 3,
+    "knobs": 1
+  },
+  "icon": {
+    "body": "#374151",
+    "keys": "#FFFFFF",
+    "accent": "#60A5FA"
+  },
+  "notes": {
+    "ru": "Прямой формат: плата сама хранит одно сочетание клавиш на кнопку, остальное выполняет программа.",
+    "be": "Прамы фармат: плата сама захоўвае адно спалучэнне клавіш на кнопку, астатняе выконвае праграма.",
+    "uk": "Прямий формат: плата сама зберігає одне поєднання клавіш на кнопку, решту виконує програма.",
+    "kk": "Тікелей пішім: тақта әр батырмаға бір пернелер тіркесін сақтайды, қалғанын бағдарлама орындайды.",
+    "zh": "直接格式：设备每个按键只保存一个组合键，其余由程序执行。",
+    "ja": "ダイレクト形式：ボードはボタンごとに1つのキーの組み合わせだけを保存し、残りはプログラムが実行します。",
+    "en": "Direct format: the board stores one key combination per button, the program does the rest.",
+    "de": "Direktformat: Die Platine speichert eine Tastenkombination pro Taste, den Rest erledigt das Programm."
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OshiMakiKey Studio",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "OshiMakiKey Studio (в трее)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": ["--tray"],
+      "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
+      "console": "internalConsole"
+    },
+    {
+      "name": "Фоновая служба OMK_Studio-Service",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": ["--service"],
+      "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
+      "console": "internalConsole"
+    },
+    {
+      "name": "Снимок окна (тёмная тема, English)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": ["--snapshot", "${workspaceFolder}/MacroPadStudio/bin/Debug/snapshot.png", "--theme", "dark", "--lang", "en"],
+      "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
+      "console": "internalConsole"
+    },
+    {
+      "name": "Самопроверка (--selftest)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": ["--selftest", "${workspaceFolder}/MacroPadStudio/bin/Debug/selftest.txt"],
+      "cwd": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows",
+      "console": "internalConsole"
+    }
+  ]
+}

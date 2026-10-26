@@ -4,32 +4,49 @@ namespace OshiMakiKey.UI;
 
 internal static class UiText
 {
-    public static bool IsKey(ControlId id) => id <= ControlId.Key6;
+    /// <summary>Плата, которую сейчас настраивают: от её раскладки зависит, нумеровать ли ручки.</summary>
+    public static DriverDef Driver { get; set; } = DriverStore.Default;
 
-    public static int KeyNumber(ControlId id) => id - ControlId.Key1 + 1;
+    public static bool IsKey(ControlId id) => Controls.IsKey(id);
 
-    public static string Title(ControlId id) => id switch
+    public static int KeyNumber(ControlId id) => Controls.KeyIndex(id) + 1;
+
+    static string KnobActionText(ControlId id) => Controls.KnobAction(id) switch
     {
-        _ when IsKey(id) => L.F("control.key", "Клавиша {0}", KeyNumber(id)),
-        ControlId.KnobLeft => L.T("control.knobLeft", "Ручка: поворот влево"),
-        ControlId.KnobPress => L.T("control.knobPress", "Ручка: нажатие"),
-        _ => L.T("control.knobRight", "Ручка: поворот вправо"),
+        0 => L.T("control.turnLeft", "поворот влево"),
+        1 => L.T("control.press", "нажатие"),
+        _ => L.T("control.turnRight", "поворот вправо"),
     };
 
-    public static string Subtitle(ControlId id) => id switch
-    {
-        ControlId.KnobLeft => L.T("control.knobLeft.hint", "Срабатывает на каждый щелчок ручки против часовой стрелки."),
-        ControlId.KnobPress => L.T("control.knobPress.hint", "Срабатывает при нажатии на ручку."),
-        ControlId.KnobRight => L.T("control.knobRight.hint", "Срабатывает на каждый щелчок ручки по часовой стрелке."),
-        _ => L.T("control.key.hint", "Что произойдёт при нажатии этой клавиши."),
-    };
+    public static string Title(ControlId id) =>
+        IsKey(id) ? L.F("control.key", "Клавиша {0}", KeyNumber(id))
+        : Driver.Layout.Knobs > 1 ? L.F("control.knobN", "Ручка {0}: {1}", Controls.KnobIndex(id) + 1, KnobActionText(id))
+        : L.F("control.knob", "Ручка: {0}", KnobActionText(id));
 
-    public static string Glyph(ControlId id) => id switch
+    public static string Subtitle(ControlId id) =>
+        IsKey(id) ? L.T("control.key.hint", "Что произойдёт при нажатии этой клавиши.")
+        : Controls.KnobAction(id) switch
+        {
+            0 => L.T("control.turnLeft.hint", "Срабатывает на каждый щелчок ручки против часовой стрелки."),
+            1 => L.T("control.press.hint", "Срабатывает при нажатии на ручку."),
+            _ => L.T("control.turnRight.hint", "Срабатывает на каждый щелчок ручки по часовой стрелке."),
+        };
+
+    public static string Glyph(ControlId id) =>
+        IsKey(id) ? KeyNumber(id).ToString() : Controls.KnobAction(id) switch { 0 => "↺", 1 => "●", _ => "↻" };
+
+    /// <summary>«12 клавиш · 3 ручки» — без склонений, чтобы одинаково работало на всех языках.</summary>
+    public static string LayoutText(DriverDef driver) =>
+        L.F("layout.text", "Клавиш: {0} · ручек: {1}", driver.Layout.Keys, driver.Layout.Knobs);
+
+    public static string ProtocolName(ProtocolMode protocol) => protocol switch
     {
-        _ when IsKey(id) => KeyNumber(id).ToString(),
-        ControlId.KnobLeft => "↺",
-        ControlId.KnobPress => "●",
-        _ => "↻",
+        ProtocolMode.Direct => L.T("protocol.name.Direct", "прямой формат"),
+        ProtocolMode.Legacy => L.T("protocol.name.Legacy", "формат k8890"),
+        ProtocolMode.Vendor => L.T("protocol.name.Vendor", "формат официальной программы (v0)"),
+        ProtocolMode.K884x => L.T("protocol.name.K884x", "формат k884x"),
+        ProtocolMode.K8850 => L.T("protocol.name.K8850", "формат k8850 (не проверен)"),
+        _ => L.T("protocol.name.Auto", "автоматически"),
     };
 
     public static string SystemDescription(SystemActionKind kind) => kind switch

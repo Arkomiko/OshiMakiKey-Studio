@@ -18,11 +18,11 @@ internal sealed class ProtocolWizardForm : Form
     sealed record WriteStep : Step;
 
     const int FirstProbeSlot = 1;
-    const int LastProbeSlot = 21; // 12 клавиш + 3 ручки × 3 действия — столько кнопок у этого семейства прошивок
+    const int LastProbeSlot = 30; // 16 клавиш + 3 ручки × 3 действия с запасом: буквы a–z, затем цифры 1–4
 
-    static readonly ControlId[] KeyIds = { ControlId.Key1, ControlId.Key2, ControlId.Key3, ControlId.Key4, ControlId.Key5, ControlId.Key6 };
-    static readonly ControlId[] KnobIds = { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight };
-    static readonly ControlId[] AllControls = KeyIds.Concat(KnobIds).ToArray();
+    readonly DriverDef _driver;
+    readonly ControlId[] KeyIds;
+    readonly ControlId[] KnobIds;
 
     const int QuietMs = 700;
 
@@ -53,8 +53,12 @@ internal sealed class ProtocolWizardForm : Form
     /// <summary>Найденные номера кнопок ручки: влево, нажатие, вправо (null — не найдены).</summary>
     public List<int>? KnobSlots { get; private set; }
 
-    public ProtocolWizardForm()
+    public ProtocolWizardForm(DriverDef driver)
     {
+        _driver = driver;
+        KeyIds = driver.Controls.Where(Model.Controls.IsKey).ToArray();
+        KnobIds = driver.Controls.Where(c => !Model.Controls.IsKey(c)).ToArray();
+
         Text = L.T("wizard.title", "Проверка записи") + " — " + Branding.AppName;
         Icon = Theme.AppIcon;
         Font = Theme.Body;
@@ -128,7 +132,7 @@ internal sealed class ProtocolWizardForm : Form
 
         _steps.Add(new ReplugStep());
         _steps.Add(new WriteStep());
-        foreach (var control in AllControls) _steps.Add(new PressStep(control));
+        foreach (var control in driver.Controls) _steps.Add(new PressStep(control));
 
         Log(L.F("wizard.log.opened", "──── Проверка записи открыта {0:dd.MM.yyyy HH:mm:ss}, {1} {2}", DateTime.Now, Branding.AppName, Branding.Version));
         if (logError != null)
@@ -155,6 +159,7 @@ internal sealed class ProtocolWizardForm : Form
     // ───────────────────────── Тестовые буквы ─────────────────────────
 
     /// <summary>Буква для кнопки с номером slot: 1 → a, 2 → b, …, 21 → u.</summary>
+    // Коды a–z (0x04–0x1D) и дальше цифры 1–9 (0x1E–0x26) идут подряд, поэтому номер кнопки — просто смещение.
     static byte CodeForSlot(int slot) => (byte)(0x04 + slot - FirstProbeSlot);
 
     static int? SlotForCode(byte code) =>
@@ -247,7 +252,7 @@ internal sealed class ProtocolWizardForm : Form
                 using var pad = MacroPadDevice.Open(device);
                 pad.Write(packets, sendInit: false);
             });
-            Log(L.F("wizard.log.written", "Записан прямой формат: кнопки {0}–{1} → буквы a–u (кнопка 1 = a, 7 = g, 13 = m, 15 = o, 21 = u), кадров {2}",
+            Log(L.F("wizard.log.written", "Записан прямой формат: кнопки {0}–{1} → буквы a–z и цифры 1–4 (кнопка 1 = a, 11 = k, 13 = m, 16 = p, 27 = 1), кадров {2}",
                 FirstProbeSlot, LastProbeSlot, packets.Count));
         }
         catch (Exception ex)
@@ -281,8 +286,7 @@ internal sealed class ProtocolWizardForm : Form
         if (keysWork) Result = ProtocolMode.Direct;
         if (KnobIds.Any(_slotSeen.ContainsKey))
         {
-            var defaults = DriverStore.FirstWith(ProtocolMode.Direct)?.KnobSlots ?? new List<int> { 11, 12, 13 };
-            KnobSlots = KnobIds.Select((id, i) => _slotSeen.TryGetValue(id, out int s) ? s : defaults[i]).ToList();
+            KnobSlots = KnobIds.Select(id => _slotSeen.TryGetValue(id, out int s) ? s : (int)_driver.SlotOf(id)).ToList();
         }
 
         string keys = string.Join(", ", KeyIds.Select(id => $"{UiText.KeyNumber(id)}→{(_slotSeen.TryGetValue(id, out int s) ? s.ToString() : "—")}"));

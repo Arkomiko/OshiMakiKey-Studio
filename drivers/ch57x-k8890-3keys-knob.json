@@ -1,0 +1,39 @@
+{
+  "id": "ch57x-k8890-3keys-knob",
+  "name": {
+    "ru": "CH57x · 3 клавиши + ручка (k8890)",
+    "be": "CH57x · 3 клавішы + ручка (k8890)",
+    "uk": "CH57x · 3 клавіші + ручка (k8890)",
+    "kk": "CH57x · 3 перне + тұтқа (k8890)",
+    "zh": "CH57x · 3 键 + 旋钮 (k8890)",
+    "ja": "CH57x · 3キー + ノブ (k8890)",
+    "en": "CH57x · 3 keys + knob (k8890)",
+    "de": "CH57x · 3 Tasten + Drehknopf (k8890)"
+  },
+  "usb": [
+    "1189:8890"
+  ],
+  "consumerBitfield": false,
+  "autoDetect": false,
+  "protocol": "Legacy",
+  "layout": {
+    "rows": 1,
+    "columns": 3,
+    "knobs": 1
+  },
+  "icon": {
+    "body": "#27272A",
+    "keys": "#E7E5E4",
+    "accent": "#FB923C"
+  },
+  "notes": {
+    "ru": "Формат k8890 (ch57x-keyboard-tool): клавиши, мультимедиа и мышь хранит сама плата, есть слои.",
+    "be": "Фармат k8890 (ch57x-keyboard-tool): клавішы, мультымедыя і мыш захоўвае сама плата, ёсць слаі.",
+    "uk": "Формат k8890 (ch57x-keyboard-tool): клавіші, мультимедіа й мишу зберігає сама плата, є шари.",
+    "kk": "k8890 пішімі (ch57x-keyboard-tool): пернелерді, мультимедиа мен тінтуірді тақтаның өзі сақтайды, қабаттар бар.",
+    "zh": "k8890 格式（ch57x-keyboard-tool）：按键、多媒体和鼠标都保存在设备中，支持多层。",
+    "ja": "k8890 形式（ch57x-keyboard-tool）：キー、メディア、マウスはボード自体に保存され、レイヤーに対応します。",
+    "en": "k8890 format (ch57x-keyboard-tool): keys, media and mouse are stored on the board, layers supported.",
+    "de": "k8890-Format (ch57x-keyboard-tool): Tasten, Medien und Maus speichert die Platine selbst, mit Ebenen."
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "folders": [
+    { "name": "OshiMakiKey Studio", "path": "." }
+  ],
+  "settings": {
+    "files.encoding": "utf8",
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true,
+      "publish": true
+    },
+    "search.exclude": {
+      "user_data": true,
+      "**/bin": true,
+      "**/obj": true
+    },
+    "dotnet.defaultSolution": "MacroPadStudio/OshiMakiKeyStudio.csproj",
+    "[csharp]": { "editor.tabSize": 4, "editor.insertSpaces": true },
+    "[json]": { "editor.tabSize": 2 }
+  },
+  "extensions": {
+    "recommendations": ["ms-dotnettools.csdevkit", "ms-dotnettools.csharp", "ms-vscode.powershell"]
+  }
+}

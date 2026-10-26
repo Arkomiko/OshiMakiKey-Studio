@@ -12,25 +12,35 @@ public static class ProfileCompiler
     /// </summary>
     public static bool SendsInitPacket(ProtocolMode protocol) => protocol != ProtocolMode.Direct;
 
+    /// <summary>Сколько нажатий подряд умеет хранить прошивка (больше — выполняет фоновый агент).</summary>
+    public static int MaxPresses(ProtocolMode protocol) => protocol switch
+    {
+        ProtocolMode.K884x => K884xProtocol.MaxPresses,
+        ProtocolMode.Direct => 1,
+        _ => K8890Protocol.MaxPresses,
+    };
+
     public static List<byte[]> Compile(AppSettings settings) => settings.EffectiveProtocol switch
     {
         ProtocolMode.Direct => CompileDirect(settings),
         ProtocolMode.Vendor => CompileVendor(settings),
-        _ => CompileLegacy(settings),
+        ProtocolMode.K884x => CompileLayered(settings, K884xProtocol.Bind),
+        ProtocolMode.K8850 => CompileLayered(settings, K8850Protocol.Bind),
+        _ => CompileLayered(settings, K8890Protocol.Bind),
     };
-
-    static List<byte[]> CompileVendor(AppSettings settings) =>
-        Enum.GetValues<ControlId>()
-            .SelectMany(id => VendorProtocol.Bind(id, ToHardware(settings.Profile.Layers[0].Get(id))))
-            .ToList();
 
     public static string Signature(IEnumerable<byte[]> packets) =>
         Convert.ToHexString(SHA256.HashData(packets.SelectMany(p => p).ToArray()));
 
+    static List<byte[]> CompileVendor(AppSettings settings) =>
+        settings.Controls
+            .SelectMany(id => VendorProtocol.Bind(settings.SlotOf(id), ToHardware(settings.Profile.Layers[0].Get(id), settings.EffectiveProtocol)))
+            .ToList();
+
     static List<byte[]> CompileDirect(AppSettings settings)
     {
         var packets = new List<byte[]>();
-        foreach (var id in Enum.GetValues<ControlId>())
+        foreach (var id in settings.Controls)
         {
             var action = settings.Profile.Layers[0].Get(id);
             var chord = action.TriggerSlot is int slot
@@ -46,16 +56,17 @@ public static class ProfileCompiler
         return packets;
     }
 
-    static List<byte[]> CompileLegacy(AppSettings settings)
+    /// <summary>Форматы со слоями: k8890, k884x, k8850 — все слои, каждая кнопка платы.</summary>
+    static List<byte[]> CompileLayered(AppSettings settings, Func<int, byte, HardwareAction, List<byte[]>> bind)
     {
         var packets = new List<byte[]>();
         for (int layer = 0; layer < settings.EffectiveLayerCount; layer++)
-            foreach (var id in Enum.GetValues<ControlId>())
-                packets.AddRange(K8890Protocol.Bind(layer, id, ToHardware(settings.Profile.Layers[layer].Get(id))));
+            foreach (var id in settings.Controls)
+                packets.AddRange(bind(layer, settings.SlotOf(id), ToHardware(settings.Profile.Layers[layer].Get(id), settings.EffectiveProtocol)));
         return packets;
     }
 
-    public static HardwareAction ToHardware(PadAction action)
+    public static HardwareAction ToHardware(PadAction action, ProtocolMode protocol = ProtocolMode.Legacy)
     {
         // Служебная клавиша выдаётся только действиям, которые выполняет фоновый агент.
         if (action.TriggerSlot is int slot)
@@ -69,7 +80,7 @@ public static class ProfileCompiler
             case ActionKind.Keys:
                 return new KeysAction(action.Chords
                     .Where(c => !c.IsEmpty)
-                    .Take(K8890Protocol.MaxPresses)
+                    .Take(MaxPresses(protocol))
                     .Select(c => (c.ModifierMask, c.Key))
                     .ToList());
 

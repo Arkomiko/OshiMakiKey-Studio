@@ -1,0 +1,46 @@
+{
+  "id": "ch57x-k884x-9keys-2knobs",
+  "name": {
+    "ru": "CH57x · 9 клавиш + 2 ручки (k884x)",
+    "be": "CH57x · 9 клавіш + 2 ручкі (k884x)",
+    "uk": "CH57x · 9 клавіш + 2 ручки (k884x)",
+    "kk": "CH57x · 9 перне + 2 тұтқа (k884x)",
+    "zh": "CH57x · 9 键 + 2 旋钮 (k884x)",
+    "ja": "CH57x · 9キー + 2ノブ (k884x)",
+    "en": "CH57x · 9 keys + 2 knobs (k884x)",
+    "de": "CH57x · 9 Tasten + 2 Drehknöpfe (k884x)"
+  },
+  "usb": [
+    "1189:8840",
+    "1189:8842",
+    "1189:8850",
+    "514C:8851",
+    "1189:8830",
+    "1189:8831",
+    "1189:8832",
+    "1189:8833",
+    "1189:8810"
+  ],
+  "autoDetect": false,
+  "protocol": "K884x",
+  "layout": {
+    "rows": 3,
+    "columns": 3,
+    "knobs": 2
+  },
+  "icon": {
+    "body": "#172554",
+    "keys": "#DBEAFE",
+    "accent": "#60A5FA"
+  },
+  "notes": {
+    "ru": "Формат k884x (ch57x-keyboard-tool, rOzzy1987/MacroPad): клавиши, мультимедиа и мышь хранит сама плата, есть слои.",
+    "be": "Фармат k884x (ch57x-keyboard-tool, rOzzy1987/MacroPad): клавішы, мультымедыя і мыш захоўвае сама плата, ёсць слаі.",
+    "uk": "Формат k884x (ch57x-keyboard-tool, rOzzy1987/MacroPad): клавіші, мультимедіа й мишу зберігає сама плата, є шари.",
+    "kk": "k884x пішімі (ch57x-keyboard-tool, rOzzy1987/MacroPad): пернелерді, мультимедиа мен тінтуірді тақтаның өзі сақтайды, қабаттар бар.",
+    "zh": "k884x 格式（ch57x-keyboard-tool、rOzzy1987/MacroPad）：按键、多媒体和鼠标都保存在设备中，支持多层。",
+    "ja": "k884x 形式（ch57x-keyboard-tool、rOzzy1987/MacroPad）：キー、メディア、マウスはボード自体に保存され、レイヤーに対応します。",
+    "en": "k884x format (ch57x-keyboard-tool, rOzzy1987/MacroPad): keys, media and mouse are stored on the board, layers supported.",
+    "de": "k884x-Format (ch57x-keyboard-tool, rOzzy1987/MacroPad): Tasten, Medien und Maus speichert die Platine selbst, mit Ebenen."
+  }
+}

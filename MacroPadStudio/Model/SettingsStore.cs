@@ -63,7 +63,9 @@ public static class SettingsStore
 
         try
         {
-            settings.Profile = PresetStore.Load(settings.ActivePreset);
+            // Несохранённые правки активного пресета лежат в рабочей копии.
+            var working = File.Exists(WorkingPath) ? TryReadProfile(WorkingPath) : null;
+            settings.Profile = working != null && working.Name == settings.ActivePreset ? working : PresetStore.Load(settings.ActivePreset);
         }
         catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -82,13 +84,35 @@ public static class SettingsStore
         return settings;
     }
 
+    /// <summary>
+    /// Рабочая копия активного пресета: все правки попадают сюда сразу, а в файл пресета — только по «Сохранить».
+    /// Так незаконченные изменения не теряются при выходе и не портят сохранённый пресет.
+    /// </summary>
+    public static string WorkingPath => Path.Combine(Folder, "working.json");
+
     public static void Save(AppSettings settings)
     {
         Directory.CreateDirectory(Folder);
         string temp = FilePath + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(settings, Json));
         File.Move(temp, FilePath, overwrite: true);
-        if (settings.ActivePreset != null) PresetStore.Save(settings.ActivePreset, settings.Profile);
+        settings.Profile.Name = settings.ActivePreset ?? "";
+        WriteProfile(settings.Profile, WorkingPath);
+    }
+
+    /// <summary>Пресет в виде текста — чтобы сравнивать рабочую копию с сохранённой.</summary>
+    public static string Snapshot(Profile profile) => JsonSerializer.Serialize(profile, Json);
+
+    static Profile? TryReadProfile(string path)
+    {
+        try
+        {
+            return ReadProfile(path);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     public static Profile ReadProfile(string path)

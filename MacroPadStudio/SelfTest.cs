@@ -29,24 +29,24 @@ internal static class SelfTest
         }
 
         // Эталонные байты взяты из тестов kriomant/ch57x-keyboard-tool (модель 1189:8890).
-        Packets("Ctrl+A на клавише 1", K8890Protocol.Bind(0, ControlId.Key1, new KeysAction(new[] { ((byte)0x01, (byte)0x04) })),
+        Packets("Ctrl+A на клавише 1", K8890Protocol.Bind(0, (byte)1, new KeysAction(new[] { ((byte)0x01, (byte)0x04) })),
             "03 fe 01 01 01", "03 01 11 01", "03 01 11 01 01 01 04", "03 aa aa");
-        Packets("Громкость+ на клавише 2", K8890Protocol.Bind(0, ControlId.Key2, new MediaAction(0xE9)),
+        Packets("Громкость+ на клавише 2", K8890Protocol.Bind(0, (byte)2, new MediaAction(0xE9)),
             "03 fe 01 01 01", "03 02 12 e9", "03 aa aa");
-        Packets("ЛКМ на клавише 3", K8890Protocol.Bind(0, ControlId.Key3, new MouseClickAction(1, 0)),
+        Packets("ЛКМ на клавише 3", K8890Protocol.Bind(0, (byte)3, new MouseClickAction(1, 0)),
             "03 fe 01 01 01", "03 03 13 01", "03 aa aa");
-        Packets("Колесо +3 на клавише 4", K8890Protocol.Bind(0, ControlId.Key4, new MouseWheelAction(3, 0)),
+        Packets("Колесо +3 на клавише 4", K8890Protocol.Bind(0, (byte)4, new MouseWheelAction(3, 0)),
             "03 fe 01 01 01", "03 04 13 00 00 00 03", "03 aa aa");
-        Packets("Колесо -1 с Ctrl на повороте влево", K8890Protocol.Bind(0, ControlId.KnobLeft, new MouseWheelAction(-1, 1)),
+        Packets("Колесо -1 с Ctrl на повороте влево", K8890Protocol.Bind(0, (byte)13, new MouseWheelAction(-1, 1)),
             "03 fe 01 01 01", "03 0d 13 00 00 00 ff 01", "03 aa aa");
-        Packets("Пусто на нажатии ручки, слой 2", K8890Protocol.Bind(1, ControlId.KnobPress, new KeysAction(Array.Empty<(byte, byte)>())),
+        Packets("Пусто на нажатии ручки, слой 2", K8890Protocol.Bind(1, (byte)14, new KeysAction(Array.Empty<(byte, byte)>())),
             "03 fe 02 01 01", "03 0e 21", "03 aa aa");
         Packets("Ctrl+C, Ctrl+V на повороте вправо",
-            K8890Protocol.Bind(0, ControlId.KnobRight, new KeysAction(new[] { ((byte)1, KeyCatalog.C), ((byte)1, KeyCatalog.V) })),
+            K8890Protocol.Bind(0, (byte)15, new KeysAction(new[] { ((byte)1, KeyCatalog.C), ((byte)1, KeyCatalog.V) })),
             "03 fe 01 01 01", "03 0f 11 02", "03 0f 11 02 01 01 06", "03 0f 11 02 02 01 19", "03 aa aa");
-        Packets("Пред. трек на клавише 6", K8890Protocol.Bind(0, ControlId.Key6, new MediaAction(0xB6)),
+        Packets("Пред. трек на клавише 6", K8890Protocol.Bind(0, (byte)6, new MediaAction(0xB6)),
             "03 fe 01 01 01", "03 06 12 b6", "03 aa aa");
-        Check("Все пакеты по 64 байта", K8890Protocol.Bind(0, ControlId.Key1, new MediaAction(0xCD)).All(p => p.Length == 64));
+        Check("Все пакеты по 64 байта", K8890Protocol.Bind(0, (byte)1, new MediaAction(0xCD)).All(p => p.Length == 64));
 
         Check("Каталог: HID-коды уникальны", KeyCatalog.All.Select(k => k.Code).Distinct().Count() == KeyCatalog.All.Count);
         Check("Клавиша A → 0x04", KeyCatalog.FromVirtualKey(Keys.A) == 0x04);
@@ -60,19 +60,20 @@ internal static class SelfTest
 
         // Служебные клавиши для системных действий.
         var profile = Profile.CreateDefault();
-        foreach (var id in Enum.GetValues<ControlId>())
+        var sixKeys = Controls.Of(6, 1);
+        foreach (var id in sixKeys)
             profile.Layers[0].Actions[id] = new PadAction { Kind = ActionKind.System, SystemAction = SystemActionKind.LockPc };
         profile.Layers[1].Actions[ControlId.Key1] = PadAction.FromKeys(KeyChord.Of(0x68)); // пользователь сам назначил F13
         profile.Layers[1].Actions[ControlId.Key2] = new PadAction { Kind = ActionKind.System, SystemAction = SystemActionKind.Sleep };
         bool SystemOnly(PadAction a) => a.Kind == ActionKind.System;
-        profile.EnsureTriggers(SystemOnly);
-        var slots = profile.All(Profile.MaxLayers).Select(x => x.Action.TriggerSlot).OfType<int>().ToList();
-        int expectedSlots = Enum.GetValues<ControlId>().Length + 1;
+        profile.EnsureTriggers(SystemOnly, sixKeys);
+        var slots = profile.All(Profile.MaxLayers, sixKeys).Select(x => x.Action.TriggerSlot).OfType<int>().ToList();
+        int expectedSlots = sixKeys.Count + 1;
         Check("Служебные клавиши уникальны", slots.Count == expectedSlots && slots.Distinct().Count() == expectedSlots, string.Join(",", slots));
         Check("F13 не занят, раз он назначен пользователем", !slots.Contains(0), string.Join(",", slots));
         int before = profile.Layers[0].Get(ControlId.Key3).TriggerSlot ?? -1;
         profile.Layers[0].Get(ControlId.Key3).Target = "изменили параметр";
-        profile.EnsureTriggers(SystemOnly);
+        profile.EnsureTriggers(SystemOnly, sixKeys);
         Check("Номер служебной клавиши не меняется при правке параметров", profile.Layers[0].Get(ControlId.Key3).TriggerSlot == before);
         Check("Служебная клавиша 13 = Shift + F14", TriggerKeys.Describe(13) == "Shift + F14", TriggerKeys.Describe(13));
         var systemPackets = ProfileCompiler.ToHardware(new PadAction { Kind = ActionKind.System, TriggerSlot = 25 });
@@ -113,18 +114,50 @@ internal static class SelfTest
             migrated.LearnedKnobSlots?.GetValueOrDefault("ch552-6keys-knob") is [7, 8, 9] && migrated.KnobSlots == null);
 
         // Формат официальной программы («версия 0»): без префикса 0x03, запись во флеш после каждой кнопки.
-        Packets("Офиц.: Ctrl+C на клавише 1", VendorProtocol.Bind(ControlId.Key1, new KeysAction(new[] { ((byte)0x01, KeyCatalog.C) })),
+        Packets("Офиц.: Ctrl+C на клавише 1", VendorProtocol.Bind((byte)1, new KeysAction(new[] { ((byte)0x01, KeyCatalog.C) })),
             "01 01 01 00 01", "01 01 01 01 01 06", "aa aa");
-        Packets("Офиц.: громкость+ на клавише 2 (бит 1)", VendorProtocol.Bind(ControlId.Key2, new MediaAction(MediaCatalog.VolumeUp)),
+        Packets("Офиц.: громкость+ на клавише 2 (бит 1)", VendorProtocol.Bind((byte)2, new MediaAction(MediaCatalog.VolumeUp)),
             "02 02 02", "aa aa");
-        Packets("Офиц.: пауза на клавише 3 (бит 5)", VendorProtocol.Bind(ControlId.Key3, new MediaAction(MediaCatalog.PlayPause)),
+        Packets("Офиц.: пауза на клавише 3 (бит 5)", VendorProtocol.Bind((byte)3, new MediaAction(MediaCatalog.PlayPause)),
             "03 02 20", "aa aa");
-        Packets("Офиц.: пустое нажатие ручки", VendorProtocol.Bind(ControlId.KnobPress, new KeysAction(Array.Empty<(byte, byte)>())),
+        Packets("Офиц.: пустое нажатие ручки", VendorProtocol.Bind((byte)14, new KeysAction(Array.Empty<(byte, byte)>())),
             "0e 01 01", "0e 01 01 01", "aa aa");
         Check("Офиц.: калькулятора нет в отчёте платы — через агента",
             Execution.NeedsAgent(PadAction.FromMedia(0x192), ProtocolMode.Vendor));
         Check("Офиц.: громкость есть в отчёте платы — само устройство",
             !Execution.NeedsAgent(PadAction.FromMedia(MediaCatalog.VolumeUp), ProtocolMode.Vendor));
+
+        // Формат k884x (1189:8840/8842/8850, 514C:8851): эталоны из тестов ch57x-keyboard-tool, после кнопки — команды записи.
+        const string k884xFinish1 = "03 aa aa", k884xFinish2 = "03 fd fe ff";
+        Packets("k884x: Ctrl+A на кнопке 1", K884xProtocol.Bind(0, 1, new KeysAction(new[] { ((byte)0x01, (byte)0x04) })),
+            "03 fe 01 01 01 00 00 00 00 00 01 01 04", k884xFinish1, k884xFinish2, k884xFinish1);
+        Packets("k884x: громкость+ на кнопке 2", K884xProtocol.Bind(0, 2, new MediaAction(0xE9)),
+            "03 fe 02 01 02 00 00 00 00 00 00 e9", k884xFinish1, k884xFinish2, k884xFinish1);
+        Packets("k884x: ЛКМ на кнопке 3", K884xProtocol.Bind(0, 3, new MouseClickAction(1, 0)),
+            "03 fe 03 01 03 00 00 00 00 00 01 00 01", k884xFinish1, k884xFinish2, k884xFinish1);
+        Packets("k884x: колесо +3 на кнопке 5", K884xProtocol.Bind(0, 5, new MouseWheelAction(3, 0)),
+            "03 fe 05 01 03 00 00 00 00 00 03 00 00 00 00 03", k884xFinish1, k884xFinish2, k884xFinish1);
+        Packets("k8850: громкость+ на кнопке 1", K8850Protocol.Bind(0, 1, new MediaAction(0xE9)),
+            "03 fd 01 01 02 00 02 00 00 e9", "03 fd fe ff");
+        Packets("k8850: Ctrl+C — модификатор отдельной записью", K8850Protocol.Bind(0, 2, new KeysAction(new[] { ((byte)0x01, KeyCatalog.C) })),
+            "03 fd 02 01 01 00 02 00 00 f1 00 00 06", "03 fd fe ff");
+
+        // Раскладки драйверов и номера кнопок прошивки.
+        var k884x = DriverStore.BuiltIns().First(d => d.Protocol == ProtocolMode.K884x);
+        Check("k884x 12+3: 21 кнопка", k884x.Controls.Count == 21, k884x.Controls.Count.ToString());
+        Check("k884x: клавиша 12 → 12, ручка 1 влево → 16, ручка 3 вправо → 24",
+            k884x.SlotOf(ControlId.Key12) == 12 && k884x.SlotOf(ControlId.KnobLeft) == 16 && k884x.SlotOf(ControlId.Knob3Right) == 24);
+        var legacyDriver = DriverStore.BuiltIns().First(d => d.Protocol == ProtocolMode.Legacy);
+        Check("k8890: ручка → 13/14/15", legacyDriver.SlotOf(ControlId.KnobLeft) == 13 && legacyDriver.SlotOf(ControlId.KnobRight) == 15);
+        Check("Прямой: ручка → 11/12/13", DriverStore.Default.SlotOf(ControlId.KnobLeft) == 11 && DriverStore.Default.SlotOf(ControlId.KnobRight) == 13);
+        var big = new AppSettings { DriverId = k884x.Id, LayerCount = 3 };
+        big.Normalize();
+        Check("k884x: слои записываются", big.EffectiveLayerCount == 3);
+        Check("k884x: пример профиля — 3 слоя × 21 кнопка × 4 кадра", ProfileCompiler.Compile(big).Count == 3 * 21 * 4, ProfileCompiler.Compile(big).Count.ToString());
+        Check("k884x: мультимедиа — сама плата", !big.NeedsAgent(PadAction.FromMedia(MediaCatalog.VolumeUp)));
+        var noRepeat = new AppSettings { NoKeyRepeat = true };
+        noRepeat.Normalize();
+        Check("Без автоповтора: сочетание выполняет программа", noRepeat.NeedsAgent(PadAction.FromKeys(KeyChord.Of(KeyCatalog.C, ctrl: true))));
 
         // Сохранение и загрузка.
         var settings = new AppSettings { Protocol = ProtocolMode.Legacy };
@@ -138,7 +171,7 @@ internal static class SelfTest
         Check("JSON: раскладка не попадает в settings.json", !json.Contains("\"Layers\""));
         Check("JSON: конфигурация совпадает после сохранения",
             ProfileCompiler.Signature(ProfileCompiler.Compile(settings)) == ProfileCompiler.Signature(ProfileCompiler.Compile(restored)));
-        int controls = Enum.GetValues<ControlId>().Length;
+        int controls = settings.Controls.Count;
         int compiled = ProfileCompiler.Compile(settings).Count;
         Check($"ch57x: пример профиля — {controls} действий × 3–4 пакета", compiled >= 3 * controls && compiled <= 4 * controls, compiled.ToString());
 
@@ -193,8 +226,11 @@ internal static class SelfTest
         Notices.Clear();
         DriverStore.Load();
         var builtIns = DriverStore.BuiltIns();
+        // Названия и пояснения в файлах на всех языках, во встроенных — только ru/en; сравниваем техническую часть.
+        static string Tech(DriverDef d) => $"{d.Protocol}|{string.Join(",", d.Usb)}|{d.ConsumerBitfield}|{d.AutoDetect}|{d.Layout.Rows}x{d.Layout.Columns}+{d.Layout.Knobs}|" +
+                                           string.Join(",", d.Controls.Select(d.SlotOf));
         Check("drivers: все встроенные драйверы лежат в папке",
-            builtIns.All(b => DriverStore.Find(b.Id) is { } d && DriverStore.Serialize(d) == DriverStore.Serialize(b)),
+            builtIns.All(b => DriverStore.Find(b.Id) is { } d && Tech(d) == Tech(b)),
             string.Join(", ", DriverStore.All.Select(d => d.Id)));
         Check("drivers: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
 
@@ -205,7 +241,7 @@ internal static class SelfTest
             .Where(p => p.PropertyType == typeof(Color))
             .Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name[1..])
             .ToHashSet();
-        Check("theme: 12 тем", ThemeStore.All.Count == 12, string.Join(", ", ThemeStore.All.Select(t => t.Id)));
+        Check("theme: 13 светлых и 13 тёмных", ThemeStore.All.Count(t => !t.Dark) == 13 && ThemeStore.All.Count(t => t.Dark) == 13, string.Join(", ", ThemeStore.All.Select(t => t.Id)));
         Check("theme: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
         foreach (var theme in ThemeStore.All)
         {
@@ -220,16 +256,19 @@ internal static class SelfTest
 
         // Языки: в английском те же ключи и те же {0}, {1}…, что в русском.
         var packs = AppPaths.JsonFiles(AppPaths.Languages).ToDictionary(f => Path.GetFileNameWithoutExtension(f), ReadStrings);
-        Check("language: есть ru и en", packs.ContainsKey("ru") && packs.ContainsKey("en"), string.Join(", ", packs.Keys));
-        if (packs.TryGetValue("ru", out var ru) && packs.TryGetValue("en", out var en))
+                Check("language: 9 языков", packs.Count == 9, string.Join(", ", packs.Keys));
+        if (packs.TryGetValue("ru", out var ru))
         {
-            Check("language: в en все ключи ru", ru.Keys.All(en.ContainsKey), string.Join(", ", ru.Keys.Where(k => !en.ContainsKey(k)).Take(10)));
-            Check("language: в en нет лишних ключей", en.Keys.All(ru.ContainsKey), string.Join(", ", en.Keys.Where(k => !ru.ContainsKey(k)).Take(10)));
             // Перевод может не использовать какую-то подстановку, но не должен ссылаться на несуществующую.
             var placeholders = new Regex(@"\{(\d+)[^}]*\}");
             HashSet<string> Slots(string text) => placeholders.Matches(text).Select(m => m.Groups[1].Value).ToHashSet();
-            var mismatched = ru.Keys.Where(k => en.TryGetValue(k, out var t) && !Slots(t).IsSubsetOf(Slots(ru[k]))).ToList();
-            Check("language: в en нет лишних подстановок {n}", mismatched.Count == 0, string.Join(", ", mismatched.Take(10)));
+            foreach (var (code, pack) in packs.Where(p => p.Key != "ru"))
+            {
+                Check($"language/{code}: все ключи ru", ru.Keys.All(pack.ContainsKey), string.Join(", ", ru.Keys.Where(k => !pack.ContainsKey(k)).Take(10)));
+                Check($"language/{code}: нет лишних ключей", pack.Keys.All(ru.ContainsKey), string.Join(", ", pack.Keys.Where(k => !ru.ContainsKey(k)).Take(10)));
+                var mismatched = ru.Keys.Where(k => pack.TryGetValue(k, out var t) && !Slots(t).IsSubsetOf(Slots(ru[k]))).ToList();
+                Check($"language/{code}: нет лишних подстановок {{n}}", mismatched.Count == 0, string.Join(", ", mismatched.Take(10)));
+            }
         }
 
         // Без папок ресурсов: встроенные настройки и уведомление.

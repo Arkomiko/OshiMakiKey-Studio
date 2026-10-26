@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "detail": "Сборка Debug (dotnet build)",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj", "-c", "Debug", "/property:GenerateFullPaths=true", "/consoleloggerparameters:NoSummary"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "publish",
+      "detail": "Portable exe в publish/, затем скопировать в корень вручную",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["publish", "${workspaceFolder}/MacroPadStudio/OshiMakiKeyStudio.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
+               "-p:PublishSingleFile=true", "-p:DebugType=None", "-p:DebugSymbols=false", "-o", "${workspaceFolder}/publish"],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "selftest",
+      "detail": "Самопроверка без интерфейса, отчёт в selftest.txt",
+      "type": "process",
+      "command": "${workspaceFolder}/MacroPadStudio/bin/Debug/net8.0-windows/OshiMakiKeyStudio.exe",
+      "args": ["--selftest", "${workspaceFolder}/MacroPadStudio/bin/Debug/selftest.txt"],
+      "dependsOn": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "lang-keys",
+      "detail": "Собрать language/ru.json из кода и проверить переводы",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/lang-keys.ps1"],
+      "problemMatcher": []
+    }
+  ]
+}

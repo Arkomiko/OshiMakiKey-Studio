@@ -2,8 +2,45 @@ using System.Text.Json.Serialization;
 
 namespace OshiMakiKey.Model;
 
-/// <summary>Элементы управления устройства: 6 клавиш (сетка 3×2) и три действия ручки.</summary>
-public enum ControlId { Key1, Key2, Key3, Key4, Key5, Key6, KnobLeft, KnobPress, KnobRight }
+/// <summary>
+/// Элементы управления: до 16 клавиш и до 3 ручек по три действия (поворот влево, нажатие, поворот вправо).
+/// Какие из них есть на плате, говорит её драйвер (<see cref="DriverDef.Controls"/>). В файлах хранятся имена,
+/// поэтому порядок можно менять; имена первой ручки (KnobLeft…) остались от версий с одной ручкой.
+/// </summary>
+public enum ControlId
+{
+    Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9, Key10, Key11, Key12, Key13, Key14, Key15, Key16,
+    KnobLeft, KnobPress, KnobRight,
+    Knob2Left, Knob2Press, Knob2Right,
+    Knob3Left, Knob3Press, Knob3Right,
+}
+
+public static class Controls
+{
+    public const int MaxKeys = 16;
+    public const int MaxKnobs = 3;
+
+    public static bool IsKey(ControlId id) => id <= ControlId.Key16;
+
+    /// <summary>Номер клавиши с нуля.</summary>
+    public static int KeyIndex(ControlId id) => id - ControlId.Key1;
+
+    public static ControlId Key(int index) => ControlId.Key1 + index;
+
+    /// <summary>Номер ручки с нуля.</summary>
+    public static int KnobIndex(ControlId id) => (id - ControlId.KnobLeft) / 3;
+
+    /// <summary>0 — поворот влево, 1 — нажатие, 2 — поворот вправо.</summary>
+    public static int KnobAction(ControlId id) => (id - ControlId.KnobLeft) % 3;
+
+    public static ControlId Knob(int knob, int action) => ControlId.KnobLeft + knob * 3 + action;
+
+    /// <summary>Клавиши и ручки платы с такой раскладкой, по порядку: клавиши построчно, затем ручки.</summary>
+    public static List<ControlId> Of(int keys, int knobs) =>
+        Enumerable.Range(0, Math.Clamp(keys, 0, MaxKeys)).Select(Key)
+            .Concat(Enumerable.Range(0, Math.Clamp(knobs, 0, MaxKnobs) * 3).Select(i => Knob(i / 3, i % 3)))
+            .ToList();
+}
 
 public enum ActionKind { None, Keys, Media, Mouse, System }
 
@@ -114,7 +151,8 @@ public sealed class Profile
         foreach (var layer in Layers)
         {
             layer.Actions ??= new();
-            foreach (var id in Enum.GetValues<ControlId>())
+            // Действия создаются по требованию (Layer.Get), поэтому чиним только те, что есть в файле.
+            foreach (var id in layer.Actions.Keys.ToList())
             {
                 var action = layer.Get(id);
                 action.Chords ??= new();
@@ -129,10 +167,11 @@ public sealed class Profile
         }
     }
 
-    public IEnumerable<(int Layer, ControlId Control, PadAction Action)> All(int layerCount)
+    /// <summary>Действия перечисленных кнопок платы в первых <paramref name="layerCount"/> слоях.</summary>
+    public IEnumerable<(int Layer, ControlId Control, PadAction Action)> All(int layerCount, IReadOnlyList<ControlId> controls)
     {
         for (int layer = 0; layer < Math.Min(layerCount, Layers.Count); layer++)
-            foreach (var id in Enum.GetValues<ControlId>())
+            foreach (var id in controls)
                 yield return (layer, id, Layers[layer].Get(id));
     }
 
@@ -141,11 +180,16 @@ public sealed class Profile
     /// (<paramref name="needsAgent"/>). Уже назначенные номера сохраняются, чтобы правка параметров
     /// действия не требовала перезаписи устройства.
     /// </summary>
-    public void EnsureTriggers(Func<PadAction, bool> needsAgent)
+    public void EnsureTriggers(Func<PadAction, bool> needsAgent, IReadOnlyList<ControlId> controls)
     {
+        // Кнопки, которых нет на плате, служебных клавиш не получают.
+        foreach (var layer in Layers)
+            foreach (var (id, action) in layer.Actions)
+                if (!controls.Contains(id)) action.TriggerSlot = null;
+
         // Сочетания, которые пользователь сам назначил кнопкам, служебными делать нельзя.
         var reserved = new HashSet<(byte, byte)>();
-        foreach (var (_, _, action) in All(MaxLayers))
+        foreach (var (_, _, action) in All(MaxLayers, controls))
             if (action.Kind == ActionKind.Keys)
                 foreach (var chord in action.Chords)
                     reserved.Add((chord.ModifierMask, chord.Key));
@@ -158,7 +202,7 @@ public sealed class Profile
         }
 
         var pending = new List<PadAction>();
-        foreach (var (_, _, action) in All(MaxLayers))
+        foreach (var (_, _, action) in All(MaxLayers, controls))
         {
             if (!needsAgent(action))
             {
@@ -209,6 +253,27 @@ public sealed class AppSettings
     /// <summary>Хэш последней успешно записанной в устройство конфигурации.</summary>
     public string? LastWrittenSignature { get; set; }
 
+    /// <summary>Мастер первого запуска пройден.</summary>
+    public bool SetupDone { get; set; }
+
+    /// <summary>Тур по окну показан.</summary>
+    public bool TourDone { get; set; }
+
+    /// <summary>Спрашивать, прежде чем перетаскивание перезапишет назначенную кнопку.</summary>
+    public bool ConfirmOverwrite { get; set; } = true;
+
+    /// <summary>
+    /// Не повторять сочетание, пока клавиша зажата: сочетания тоже выполняет программа (служебная клавиша
+    /// регистрируется без автоповтора), а не прошивка, которую Windows повторяет как обычную клавиатуру.
+    /// </summary>
+    public bool NoKeyRepeat { get; set; }
+
+    /// <summary>Пресет, с которым работает фоновая служба OMK_Studio-Service; null — активный.</summary>
+    public string? ServicePreset { get; set; }
+
+    /// <summary>Пользователь попросил больше не предлагать установить службу.</summary>
+    public bool ServicePromptDismissed { get; set; }
+
     /// <summary>Драйвер, выбранный вручную; null — определять по подключённой плате.</summary>
     public string? DriverId { get; set; }
 
@@ -234,25 +299,31 @@ public sealed class AppSettings
     [JsonIgnore]
     public ProtocolMode EffectiveProtocol => EffectiveDriver.Protocol;
 
-    /// <summary>Номер кнопки в прошивке: из драйвера, для ручки — с учётом найденного мастером.</summary>
+    /// <summary>Клавиши и ручки подключённой (или выбранной) платы.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<ControlId> Controls => EffectiveDriver.Controls;
+
+    /// <summary>Номер кнопки в прошивке: из драйвера, для ручек — с учётом найденного мастером.</summary>
     public byte SlotOf(ControlId control)
     {
         var driver = EffectiveDriver;
-        int knob = Array.IndexOf(new[] { ControlId.KnobLeft, ControlId.KnobPress, ControlId.KnobRight }, control);
-        if (knob < 0) return (byte)driver.KeySlots[control - ControlId.Key1];
-        if (LearnedKnobSlots != null && LearnedKnobSlots.TryGetValue(driver.Id, out var learned) &&
-            learned is { Count: 3 } && learned[knob] is > 0 and < 0xA0)
-            return (byte)learned[knob];
-        return (byte)driver.KnobSlots[knob];
+        if (!Model.Controls.IsKey(control) && LearnedKnobSlots != null && LearnedKnobSlots.TryGetValue(driver.Id, out var learned))
+        {
+            int index = Model.Controls.KnobIndex(control) * 3 + Model.Controls.KnobAction(control);
+            if (learned.Count == driver.Layout.Knobs * 3 && learned[index] is > 0 and < 0xA0) return (byte)learned[index];
+        }
+        return driver.SlotOf(control);
     }
 
-    /// <summary>Слои есть только в формате ch57x — для остальных записывается только первый.</summary>
+    /// <summary>Слои есть не во всех форматах — для остальных записывается только первый.</summary>
     [JsonIgnore]
-    public int EffectiveLayerCount => EffectiveProtocol == ProtocolMode.Legacy ? LayerCount : 1;
+    public int EffectiveLayerCount => Execution.SupportsLayers(EffectiveProtocol) ? LayerCount : 1;
 
-    public bool NeedsAgent(PadAction action) => Execution.NeedsAgent(action, EffectiveProtocol);
+    public bool NeedsAgent(PadAction action) =>
+        Execution.NeedsAgent(action, EffectiveProtocol) ||
+        (NoKeyRepeat && action.Kind == ActionKind.Keys && action.Chords.Any(c => !c.IsEmpty));
 
-    public void EnsureTriggers() => Profile.EnsureTriggers(NeedsAgent);
+    public void EnsureTriggers() => Profile.EnsureTriggers(NeedsAgent, Controls);
 
     public void Normalize()
     {
@@ -264,7 +335,7 @@ public sealed class AppSettings
         if (DriverId == null && Protocol != ProtocolMode.Auto) DriverId = DriverStore.FirstWith(Protocol)?.Id;
         if (DetectedDriverId == null && DetectedProtocol is ProtocolMode detected and not ProtocolMode.Auto)
             DetectedDriverId = DriverStore.FirstWith(detected)?.Id;
-        if (KnobSlots is { Count: 3 } && DriverStore.FirstWith(ProtocolMode.Direct) is { } direct)
+        if (KnobSlots is { Count: 3 } && DriverStore.Find("ch552-6keys-knob") is { } direct)
         {
             LearnedKnobSlots ??= new();
             LearnedKnobSlots.TryAdd(direct.Id, KnobSlots);
@@ -293,11 +364,20 @@ public enum ProtocolMode
 
     /// <summary>Формат официальной программы для плат без Report ID («версия 0»): без префикса 0x03 и без слоёв.</summary>
     Vendor,
+
+    /// <summary>Формат k884x (ch57x-keyboard-tool): платы 1189:8840/8842/8850 и 514C:8851, до 15 клавиш и 3 ручек.</summary>
+    K884x,
+
+    /// <summary>Формат k8850 (ch57x-keyboard-tool): плата 514C:8850 с сеткой 4×4.</summary>
+    K8850,
 }
 
 /// <summary>Что устройство умеет само, а что выполняет фоновый агент программы.</summary>
 public static class Execution
 {
+    /// <summary>Прошивка хранит несколько слоёв (переключаются на самой плате).</summary>
+    public static bool SupportsLayers(ProtocolMode protocol) =>
+        protocol is ProtocolMode.Legacy or ProtocolMode.K884x or ProtocolMode.K8850;
     public static bool NeedsAgent(PadAction action, ProtocolMode protocol) => action.Kind switch
     {
         ActionKind.None => false,

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Установщик OshiMakiKey Studio: .NET Framework 4.8 уже есть в Windows 10 и 11, поэтому сам установщик маленький,
+       а программа внутри — самодостаточная сборка (payload.zip), ей .NET ставить не нужно. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OshiMakiKeySetup</AssemblyName>
+    <RootNamespace>OshiMakiKey.Setup</RootNamespace>
+    <ApplicationIcon>..\..\MacroPadStudio\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>OshiMakiKey Studio Setup</Product>
+    <Company>Arkomiko</Company>
+    <Version>0.1.6</Version>
+    <InformationalVersion>0.1.6b</InformationalVersion>
+    <!-- Архитектура программы внутри (x64 или x86) и путь к архиву с ней задаёт tools/build-release.py. -->
+    <PayloadArch Condition="'$(PayloadArch)' == ''">x64</PayloadArch>
+    <PayloadZip Condition="'$(PayloadZip)' == ''">payload.zip</PayloadZip>
+    <DefineConstants Condition="'$(PayloadArch)' == 'x64'">$(DefineConstants);PAYLOAD_X64</DefineConstants>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="Microsoft.CSharp" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

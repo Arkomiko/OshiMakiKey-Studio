@@ -16,3 +16,7 @@ publish/
 # Рабочая папка ассистента — только локально, никогда не отправляется на GitHub
 .claude/
 MacroPadStudio/.vs/
+
+# Сборка релиза (tools/build-release.py)
+release/
+installer/Setup/payload.zip

@@ -3,16 +3,16 @@ using System.Text;
 namespace OshiMakiKey.Model;
 
 /// <summary>
-/// Журналы в user_data. Файл открывается на совместную запись, чтобы монитор и мастер не мешали друг другу.
-/// Автоочистка (<see cref="Cleanup"/>) при запуске: monitor.log укорачивается до последних записей,
-/// старые и лишние diagnostics-*.log удаляются.
+/// Журналы в user_data. monitor.log хранит не больше <see cref="MonitorLogLines"/> последних событий: монитор и мастер
+/// пишут в него через <see cref="CappedLog"/>, который дописывает свои строки к тому, что уже в файле, и обрезает начало.
+/// Автоочистка (<see cref="Cleanup"/>) при запуске: старые и лишние diagnostics-*.log удаляются.
 /// </summary>
 public static class LogFiles
 {
     public static string MonitorLog => Path.Combine(AppPaths.UserData, "monitor.log");
 
-    const long MonitorLogLimit = 512 * 1024;   // больше — укорачиваем…
-    const int MonitorLogKeep = 128 * 1024;     // …до последних 128 КБ
+    /// <summary>Сколько последних событий хранит monitor.log — чтобы удержание кнопки не раздувало файл.</summary>
+    public const int MonitorLogLines = 500;
     const int DiagnosticsKeepDays = 14;
     const int DiagnosticsKeepCount = 10;
 
@@ -34,38 +34,10 @@ public static class LogFiles
         }
     }
 
-    static void TrimMonitorLog()
-    {
-        var file = new FileInfo(MonitorLog);
-        if (!file.Exists || file.Length <= MonitorLogLimit) return;
-        byte[] tail = new byte[MonitorLogKeep];
-        using (var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-        {
-            stream.Seek(-MonitorLogKeep, SeekOrigin.End);
-            stream.ReadExactly(tail);
-        }
-        // Начинаем с целой строки, чтобы не оставить обрывок в начале файла.
-        int start = Array.IndexOf(tail, (byte)'\n') + 1;
-        using var output = new FileStream(file.FullName, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
-        output.Write(tail, start, tail.Length - start);
-    }
+    static void TrimMonitorLog() => CappedLog.Append(MonitorLog, Array.Empty<string>(), MonitorLogLines);
 
-    /// <summary>Открывает журнал на дозапись. Null и текст ошибки — если открыть не удалось.</summary>
-    public static StreamWriter? OpenAppend(string path, out string? error)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-            error = null;
-            return new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            error = ex.Message;
-            return null;
-        }
-    }
+    /// <summary>Открывает monitor.log на запись с ограничением в <see cref="MonitorLogLines"/> строк.</summary>
+    public static CappedLog OpenMonitorLog() => new(MonitorLog, MonitorLogLines);
 
     /// <summary>Сохраняет строки отдельным файлом; возвращает путь или null.</summary>
     public static string? SaveSnapshot(string prefix, IEnumerable<string> lines)
@@ -81,5 +53,76 @@ public static class LogFiles
         {
             return null;
         }
+    }
+}
+
+/// <summary>
+/// Журнал с ограничением по числу строк. Новые строки копятся и раз в 300 мс дописываются в файл: файл читается,
+/// к нему добавляются новые строки, лишнее начало отрезается. Так два писателя (монитор и мастер) не затирают друг друга.
+/// </summary>
+public sealed class CappedLog : IDisposable
+{
+    readonly string _path;
+    readonly int _limit;
+    readonly List<string> _pending = new();
+    readonly System.Threading.Timer _timer;
+    readonly object _lock = new();
+
+    /// <summary>Текст последней ошибки записи (null — всё хорошо).</summary>
+    public string? Error { get; private set; }
+
+    public CappedLog(string path, int limit)
+    {
+        _path = path;
+        _limit = limit;
+        _timer = new System.Threading.Timer(_ => Flush());
+    }
+
+    public void WriteLine(string line)
+    {
+        lock (_lock) _pending.Add(line);
+        _timer.Change(300, Timeout.Infinite);
+    }
+
+    public void Flush()
+    {
+        string[] lines;
+        lock (_lock)
+        {
+            if (_pending.Count == 0) return;
+            lines = _pending.ToArray();
+            _pending.Clear();
+        }
+        Error = Append(_path, lines, _limit);
+    }
+
+    /// <summary>Дописывает строки и оставляет в файле последние <paramref name="limit"/>; возвращает текст ошибки или null.</summary>
+    public static string? Append(string path, IReadOnlyCollection<string> lines, int limit)
+    {
+        try
+        {
+            if (lines.Count == 0 && !File.Exists(path)) return null;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            var all = new List<string>();
+            using (var reader = new StreamReader(stream, Encoding.UTF8, true, 4096, leaveOpen: true))
+                while (reader.ReadLine() is string existing) all.Add(existing);
+            if (lines.Count == 0 && all.Count <= limit) return null;
+            all.AddRange(lines);
+            stream.SetLength(0);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            foreach (var line in all.Skip(Math.Max(0, all.Count - limit))) writer.WriteLine(line);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        _timer.Dispose();
+        Flush();
     }
 }

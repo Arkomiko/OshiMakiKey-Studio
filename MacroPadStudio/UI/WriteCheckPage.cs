@@ -36,7 +36,7 @@ internal sealed class WriteCheckPage : UserControl
     readonly Button _skip = new();
     readonly System.Windows.Forms.Timer _quiet = new() { Interval = QuietMs };
     readonly System.Windows.Forms.Timer _replugSettle = new() { Interval = 1500 };
-    readonly StreamWriter? _file;
+    readonly CappedLog _file = LogFiles.OpenMonitorLog();
     readonly List<Step> _steps = new();
     readonly List<string> _captured = new();
     readonly Dictionary<ControlId, int> _slotSeen = new();
@@ -130,7 +130,8 @@ internal sealed class WriteCheckPage : UserControl
             Next();
         };
 
-        _file = LogFiles.OpenAppend(LogFiles.MonitorLog, out string? logError);
+        // Проверяем, что журнал доступен для записи (ошибку покажем строкой в протоколе).
+        string? logError = CappedLog.Append(LogFiles.MonitorLog, Array.Empty<string>(), LogFiles.MonitorLogLines);
 
         _steps.Add(new ReplugStep());
         _steps.Add(new WriteStep());
@@ -353,7 +354,7 @@ internal sealed class WriteCheckPage : UserControl
         Log(L.T("wizard.log.closed", "──── Проверка записи закрыта"));
         // Мастер закрыли раньше итога — протокол всё равно сохраняем.
         if (_savedPath == null && _started) SaveProtocol();
-        _file?.Dispose();
+        _file.Dispose();
     }
 
     /// <summary>Окно получило WM_DEVICECHANGE (его шлют только окнам верхнего уровня) — передаёт сюда.</summary>
@@ -450,7 +451,7 @@ internal sealed class WriteCheckPage : UserControl
         _log.TopIndex = Math.Max(0, _log.Items.Count - 1);
         try
         {
-            _file?.WriteLine(line);
+            _file.WriteLine(line);
         }
         catch (IOException)
         {

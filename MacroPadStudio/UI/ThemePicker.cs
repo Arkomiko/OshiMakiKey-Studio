@@ -5,7 +5,7 @@ namespace OshiMakiKey.UI;
 
 /// <summary>
 /// Выбор темы: сворачиваемая группа «Стандартные» (светлые и тёмные — кружками цвета акцента)
-/// и группа «Пользовательские» (темы из theme/custom — карточками с миниатюрой).
+/// и группа «Пользовательские» (темы из themes/custom — карточками с миниатюрой).
 /// </summary>
 internal sealed class ThemePicker : FlowLayoutPanel
 {

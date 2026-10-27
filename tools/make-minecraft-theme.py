@@ -1,10 +1,10 @@
-# Собирает пакет темы theme/custom/minecraft.zip: theme.ts, текстуры блоков 16×16 в img, папки animate и scripts.
+# Собирает пакет темы themes/custom/minecraft.zip: theme.ts, текстуры блоков 16×16 в img, папки animate и scripts.
 # Текстуры рисуются здесь же по пикселям (детерминированный шум), так что пакет можно пересобрать без внешних файлов.
 # Запуск: python tools/make-minecraft-theme.py
 import os, random, struct, zipfile, zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, 'theme', 'custom', 'minecraft.zip')
+OUT = os.path.join(ROOT, 'themes', 'custom', 'minecraft.zip')
 
 
 def png(pixels, w, h):
@@ -119,8 +119,82 @@ ANIMATE_README = '''Кадры анимированного фона: PNG/JPG, �
 Эта тема рисует фон сценой «minecraft», поэтому кадров здесь нет.
 '''
 
-SCRIPTS_README = '''Папка для скриптов темы. Программа их хранит, но никогда не выполняет:
-тема из интернета не должна запускать код на компьютере.
+SCRIPTS_README = '''Скрипты темы (*.js) выполняются во встроенной песочнице: без доступа к файлам, сети, процессам и .NET.
+Скрипту видны только объект theme (onFrame, addWindow, hour, minute, log) и холст g для рисования.
+Зависший или упавший скрипт отключается, программа продолжает работать.
+'''
+
+MAIN_JS = r'''// Скрипт темы «В стиле Minecraft»: светлячки ночью, птицы днём и окно «Верстак» в меню «Справка».
+// Работает в песочнице программы: доступны только theme и холст g.
+function hex2(n) {
+  var s = Math.max(0, Math.min(255, Math.floor(n))).toString(16).toUpperCase();
+  return s.length < 2 ? '0' + s : s;
+}
+
+var flies = [];
+for (var i = 0; i < 24; i++) {
+  flies.push({ x: Math.random(), y: 0.45 + Math.random() * 0.45, p: Math.random() * 6.28, s: 0.3 + Math.random() * 0.7 });
+}
+var birds = [];
+for (var j = 0; j < 4; j++) {
+  birds.push({ y: 0.08 + j * 0.05 + Math.random() * 0.05, p: Math.random(), s: 0.015 + Math.random() * 0.012 });
+}
+
+theme.onFrame(function (g, t, w, h) {
+  var hour = theme.hour();
+  if (hour >= 20 || hour < 6) {
+    for (var i = 0; i < flies.length; i++) {
+      var f = flies[i];
+      var x = f.x * w + Math.sin(t * f.s + f.p) * 30;
+      var y = f.y * h + Math.cos(t * f.s * 1.3 + f.p) * 20;
+      var a = 128 + 127 * Math.sin(t * 2 + f.p);
+      g.rect(x - 4, y - 4, 9, 9, '#' + hex2(a / 5) + 'D8FF6A');
+      g.rect(x - 1, y - 1, 3, 3, '#' + hex2(a) + 'E8FF8A');
+    }
+  } else if (hour >= 8 && hour < 17) {
+    for (var k = 0; k < birds.length; k++) {
+      var b = birds[k];
+      var bx = ((b.p + t * b.s) % 1.2 - 0.1) * w;
+      var by = b.y * h + Math.sin(t * 2 + b.p * 6) * 4;
+      var dy = Math.sin(t * 8 + b.p * 6) * 4;
+      g.line(bx - 8, by - dy, bx, by, '#1E2A36', 2);
+      g.line(bx, by, bx + 8, by - dy, '#1E2A36', 2);
+    }
+  }
+});
+
+var grid = ['dirt', 'grass_side', 'stone', 'log', 'leaves', 'stone', 'dirt', 'grass_side', 'log'];
+var blocks = ['dirt', 'grass_side', 'grass_top', 'stone', 'log', 'leaves'];
+var cell = 64, gap = 4, top = 50, lastW = 360;
+
+function origin(w) { return (w - cell * 3 - gap * 2) / 2; }
+
+theme.addWindow({
+  title: 'Minecraft — верстак',
+  menu: 'Верстак темы Minecraft…',
+  width: 360,
+  height: 320,
+  onFrame: function (g, t, w, h) {
+    lastW = w;
+    g.rect(0, 0, w, h, '#313131');
+    g.text('Верстак: щёлкните по клетке, чтобы сменить блок', 16, 14, '#FFFFFF', 14);
+    var ox = origin(w);
+    var lit = Math.floor(t * 2) % 9;
+    for (var i = 0; i < 9; i++) {
+      var x = ox + (i % 3) * (cell + gap), y = top + Math.floor(i / 3) * (cell + gap);
+      g.rect(x - 2, y - 2, cell + 4, cell + 4, i === lit ? '#FFFFFF' : '#8B8B8B');
+      g.rect(x, y, cell, cell, '#555555');
+      g.image(grid[i], x + 6, y + 6, cell - 12, cell - 12);
+    }
+    g.text('scripts/main.js · песочница без доступа к файлам и сети', 16, h - 30, '#C6C6C6', 12);
+  },
+  onClick: function (x, y) {
+    var col = Math.floor((x - origin(lastW)) / (cell + gap)), row = Math.floor((y - top) / (cell + gap));
+    if (col < 0 || col > 2 || row < 0 || row > 2) return;
+    var i = row * 3 + col;
+    grid[i] = blocks[(blocks.indexOf(grid[i]) + 1) % blocks.length];
+  },
+});
 '''
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
@@ -130,4 +204,5 @@ with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('img/' + name + '.png', png(pixels, 16, 16))
     z.writestr('animate/readme.txt', ANIMATE_README)
     z.writestr('scripts/readme.txt', SCRIPTS_README)
+    z.writestr('scripts/main.js', MAIN_JS)
 print(OUT)

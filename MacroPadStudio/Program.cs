@@ -21,6 +21,7 @@ internal static class Program
     ///                        --theme id и --lang код — только для этого снимка
     ///                        --switch-theme id / --switch-lang код — сменить уже открытому окну (проверка без перезапуска),
     ///                        --page settings|about|setup — снимок с открытой страницей
+    ///   --sky-hour 0..23     час для неба анимированных тем вместо часов компьютера
     ///   --form-snapshot settings0..6|about|setup-0..2|overwrite файл.png  снимок одной страницы или диалога
     ///   --drop-test файл     перетаскивание действий на клавиши и ручку, отчёт PASS/FAIL в файл
     ///   --wizard-snapshot файл.png  снимок страницы проверки записи
@@ -36,6 +37,11 @@ internal static class Program
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
         }
 
+        // Служба Windows и её установка (последние два — уже с правами администратора, их запускает UAC из настроек).
+        if (args.Contains("--winservice")) return Agent.WinService.Run();
+        if (args.Contains("--install-winservice")) return Agent.WinService.Install();
+        if (args.Contains("--remove-winservice")) return Agent.WinService.Remove();
+
         if (Arg("--selftest") is string testReport) return SelfTest.Run(testReport);
         if (Arg("--probe") is string probeReport) return SelfTest.Probe(probeReport);
 
@@ -47,6 +53,7 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
         Theme.Init();
+        if (int.TryParse(Arg("--sky-hour"), out int skyHour)) ThemeBackdrop.HourOverride = skyHour;
 
         // Фоновая служба OMK_Studio-Service — тот же exe без окна.
         if (args.Contains("--service")) return Agent.OmkService.Run();
@@ -129,6 +136,7 @@ internal static class Program
             if (int.TryParse(Arg("--tour"), out int tourStep)) snapshotForm.SnapshotTourStep = tourStep;
             snapshotForm.SnapshotSwitch = (Arg("--switch-theme"), Arg("--switch-lang"));
             snapshotForm.SnapshotPage = Arg("--page");
+            snapshotForm.SnapshotPreviewTheme = Arg("--preview-theme");
             Application.Run(snapshotForm);
             return 0;
         }

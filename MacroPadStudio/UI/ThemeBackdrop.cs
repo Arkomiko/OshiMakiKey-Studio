@@ -20,6 +20,9 @@ internal sealed class ThemeBackdrop : IDisposable
     readonly HashSet<Control> _hooked = new();
     Scene? _scene;
 
+    /// <summary>Час для неба сцены вместо часов компьютера (снимки и проверка); null — настоящее время.</summary>
+    public static int? HourOverride { get; set; }
+
     /// <summary>У текущей темы есть свой фон.</summary>
     public static bool Active => Scene.Has(ThemeStore.Current);
 
@@ -183,11 +186,14 @@ internal sealed class ThemeBackdrop : IDisposable
         Bitmap?[] _scaledFrames = Array.Empty<Bitmap?>();
         Bitmap? _picture;
 
-        public static bool Has(ThemeDef theme) => theme.Frames.Count > 0 || IsMinecraft(theme) || theme.Picture != null;
+        public static bool Has(ThemeDef theme) => theme.Frames.Count > 0 || IsMinecraft(theme) || theme.Picture != null || theme.Scripts.Count > 0;
 
         static bool IsMinecraft(ThemeDef theme) => string.Equals(theme.Background, "minecraft", StringComparison.OrdinalIgnoreCase);
 
-        public bool Animated => _theme.Frames.Count > 1 || IsMinecraft(_theme);
+        public bool Animated => _theme.Frames.Count > 1 || IsMinecraft(_theme) || (Live && ThemeScripts.HasFrame);
+
+        // Живой фон окна (а не миниатюра в списке тем): только на нём рисуют скрипты темы.
+        bool Live => _texel > 1;
 
         public Scene(ThemeDef theme, int texel)
         {
@@ -219,6 +225,8 @@ internal sealed class ThemeBackdrop : IDisposable
             g.CompositingQuality = CompositingQuality.HighSpeed;
             g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
+            using (var window = new SolidBrush(Theme.Parse(_theme.Colors).TryGetValue("window", out var color) ? color : Theme.Window))
+                g.FillRectangle(window, 0, 0, _size.Width, _size.Height);
             if (_theme.Frames.Count > 0)
             {
                 if (_scaledFrames.Length != _theme.Frames.Count) _scaledFrames = new Bitmap?[_theme.Frames.Count];
@@ -227,6 +235,7 @@ internal sealed class ThemeBackdrop : IDisposable
             }
             else if (IsMinecraft(_theme)) ComposeMinecraft(g, time);
             else if (_theme.Picture != null) g.DrawImageUnscaled(_picture ??= Cover(_theme.Picture), 0, 0);
+            if (Live) ThemeScripts.DrawFrame(g, _size, time);
         }
 
         /// <summary>Картинка, заполняющая окно целиком с сохранением пропорций (лишнее обрезается).</summary>
@@ -241,19 +250,38 @@ internal sealed class ThemeBackdrop : IDisposable
             return result;
         }
 
-        // ───────── Сцена «minecraft»: вечернее небо со звёздами, облака, дальние холмы и земля из блоков ─────────
+        // ───────── Сцена «minecraft»: небо по часам (день, закат, ночь со звёздами), облака, холмы и земля из блоков ─────────
 
         int Block => _texel * 16;
 
+        /// <summary>Время суток по часам компьютера: день, рассвет или закат, ночь.</summary>
+        enum Sky { Day, Sunset, Night }
+
+        Sky _sky0 = (Sky)(-1);
+
+        static Sky SkyNow()
+        {
+            int hour = HourOverride ?? DateTime.Now.Hour;
+            return hour is >= 8 and < 17 ? Sky.Day : hour is >= 6 and < 8 or >= 17 and < 21 ? Sky.Sunset : Sky.Night;
+        }
+
         void ComposeMinecraft(Graphics g, double time)
         {
-            if (_sky == null) BuildMinecraft();
+            // Время суток сменилось (или слоёв ещё нет) — перерисовываем слои под новое небо.
+            var sky = SkyNow();
+            if (_sky == null || sky != _sky0)
+            {
+                foreach (var bitmap in new[] { _sky, _clouds, _hills, _terrain }) bitmap?.Dispose();
+                _sky0 = sky;
+                BuildMinecraft(sky);
+            }
             int w = _size.Width, h = _size.Height;
             g.DrawImageUnscaled(_sky!, 0, 0);
 
-            foreach (var (x, y, phase) in _stars)
+            double starLight = sky switch { Sky.Night => 1, Sky.Sunset => 0.3, _ => 0 };
+            foreach (var (x, y, phase) in starLight > 0 ? _stars : Array.Empty<(float, float, float)>())
             {
-                int alpha = (int)(150 + 100 * Math.Sin(time * 1.6 + phase));
+                int alpha = (int)((150 + 100 * Math.Sin(time * 1.6 + phase)) * starLight);
                 using var brush = new SolidBrush(Color.FromArgb(Math.Clamp(alpha, 0, 255), 255, 255, 240));
                 g.FillRectangle(brush, x * w, y * h, _texel, _texel);
             }
@@ -271,7 +299,7 @@ internal sealed class ThemeBackdrop : IDisposable
             g.DrawImageUnscaled(layer, x + layer.Width, y);
         }
 
-        void BuildMinecraft()
+        void BuildMinecraft(Sky sky)
         {
             int w = _size.Width, h = _size.Height, block = Block;
             var rnd = new Random(1189);
@@ -279,15 +307,33 @@ internal sealed class ThemeBackdrop : IDisposable
             _sky = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(_sky))
             {
-                using (var brush = new LinearGradientBrush(new Rectangle(0, -1, w, h + 2), Color.FromArgb(0x10, 0x1A, 0x3E), Color.FromArgb(0x3D, 0x5C, 0x93), 90f))
-                    g.FillRectangle(brush, 0, 0, w, h);
-                // Квадратная луна с «кратерами».
-                int moon = block * 5 / 4, mx = (int)(w * 0.8), my = (int)(h * 0.1);
-                using (var brush = new SolidBrush(Color.FromArgb(0xF2, 0xEF, 0xD2))) g.FillRectangle(brush, mx, my, moon, moon);
-                using (var brush = new SolidBrush(Color.FromArgb(0xC9, 0xC5, 0xA6)))
+                var (top, horizon) = sky switch
                 {
-                    g.FillRectangle(brush, mx + moon / 5, my + moon / 4, moon / 5, moon / 5);
-                    g.FillRectangle(brush, mx + moon * 3 / 5, my + moon / 2, moon / 4, moon / 4);
+                    Sky.Day => (Color.FromArgb(0x2C, 0x5C, 0xB4), Color.FromArgb(0x78, 0xA8, 0xE4)),
+                    Sky.Sunset => (Color.FromArgb(0x2B, 0x3E, 0x7A), Color.FromArgb(0xF0, 0x8A, 0x4B)),
+                    _ => (Color.FromArgb(0x10, 0x1A, 0x3E), Color.FromArgb(0x3D, 0x5C, 0x93)),
+                };
+                using (var brush = new LinearGradientBrush(new Rectangle(0, -1, w, h + 2), top, horizon, 90f))
+                    g.FillRectangle(brush, 0, 0, w, h);
+                int disc = block * 5 / 4;
+                if (sky == Sky.Night)
+                {
+                    // Квадратная луна с «кратерами».
+                    int mx = (int)(w * 0.8), my = (int)(h * 0.1);
+                    using (var brush = new SolidBrush(Color.FromArgb(0xF2, 0xEF, 0xD2))) g.FillRectangle(brush, mx, my, disc, disc);
+                    using (var brush = new SolidBrush(Color.FromArgb(0xC9, 0xC5, 0xA6)))
+                    {
+                        g.FillRectangle(brush, mx + disc / 5, my + disc / 4, disc / 5, disc / 5);
+                        g.FillRectangle(brush, mx + disc * 3 / 5, my + disc / 2, disc / 4, disc / 4);
+                    }
+                }
+                else
+                {
+                    // Квадратное солнце: днём высоко, на закате — низко над холмами.
+                    bool day = sky == Sky.Day;
+                    int sx = (int)(w * (day ? 0.9 : 0.14)), sy = (int)(h * (day ? 0.24 : 0.42));
+                    using (var glow = new SolidBrush(Color.FromArgb(day ? 60 : 90, 255, 240, 170))) g.FillRectangle(glow, sx - disc / 4, sy - disc / 4, disc * 3 / 2, disc * 3 / 2);
+                    using (var brush = new SolidBrush(day ? Color.FromArgb(0xFF, 0xF4, 0xA0) : Color.FromArgb(0xFF, 0xB8, 0x5C))) g.FillRectangle(brush, sx, sy, disc, disc);
                 }
             }
             _stars = Enumerable.Range(0, 70).Select(_ => ((float)rnd.NextDouble(), (float)(rnd.NextDouble() * 0.45), (float)(rnd.NextDouble() * Math.PI * 2))).ToArray();
@@ -297,7 +343,7 @@ internal sealed class ThemeBackdrop : IDisposable
             int cloudWidth = Math.Max(w, block * 40) / cell * cell + cell;
             _clouds = new Bitmap(cloudWidth, (int)(h * 0.35) + cell * 4, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(_clouds))
-            using (var brush = new SolidBrush(Color.FromArgb(205, 255, 255, 255)))
+            using (var brush = new SolidBrush(sky == Sky.Sunset ? Color.FromArgb(215, 255, 214, 190) : Color.FromArgb(sky == Sky.Day ? 235 : 205, 255, 255, 255)))
             {
                 int count = Math.Max(4, cloudWidth / (block * 6));
                 for (int i = 0; i < count; i++)
@@ -321,8 +367,8 @@ internal sealed class ThemeBackdrop : IDisposable
             int columns = Math.Max(w, block * 48) / step + 1;
             _hills = new Bitmap(columns * step, block * 6, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(_hills))
-            using (var body = new SolidBrush(Color.FromArgb(0x1C, 0x33, 0x34)))
-            using (var top = new SolidBrush(Color.FromArgb(0x27, 0x47, 0x40)))
+            using (var body = new SolidBrush(sky == Sky.Day ? Color.FromArgb(0x4E, 0x7D, 0x6A) : sky == Sky.Sunset ? Color.FromArgb(0x3A, 0x3E, 0x5A) : Color.FromArgb(0x1C, 0x33, 0x34)))
+            using (var top = new SolidBrush(sky == Sky.Day ? Color.FromArgb(0x63, 0x95, 0x7C) : sky == Sky.Sunset ? Color.FromArgb(0x4E, 0x4E, 0x6A) : Color.FromArgb(0x27, 0x47, 0x40)))
             {
                 for (int i = 0; i < columns; i++)
                 {
@@ -346,10 +392,11 @@ internal sealed class ThemeBackdrop : IDisposable
             using (var g = Graphics.FromImage(_terrain))
             using (var dim = new ImageAttributes())
             {
-                // Вечер: земля чуть темнее текстур.
+                // Днём текстуры как есть, на закате и ночью земля темнее.
+                float light = sky switch { Sky.Day => 1f, Sky.Sunset => 0.85f, _ => 0.72f };
                 dim.SetColorMatrix(new ColorMatrix(new[]
                 {
-                    new[] { 0.72f, 0, 0, 0, 0 }, new[] { 0, 0.72f, 0, 0, 0 }, new[] { 0, 0, 0.8f, 0, 0 }, new[] { 0, 0, 0, 1f, 0 }, new[] { 0, 0, 0, 0, 1f },
+                    new[] { light, 0, 0, 0, 0 }, new[] { 0, light, 0, 0, 0 }, new[] { 0, 0, Math.Min(1f, light + 0.08f), 0, 0 }, new[] { 0, 0, 0, 1f, 0 }, new[] { 0, 0, 0, 0, 1f },
                 }));
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;

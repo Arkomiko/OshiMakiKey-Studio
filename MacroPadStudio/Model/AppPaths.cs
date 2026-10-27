@@ -13,7 +13,10 @@ public static class AppPaths
     public static string Presets => Path.Combine(UserData, "presets");
 
     public static string Drivers => Path.Combine(Root, "drivers");
-    public static string Themes => Path.Combine(Root, "theme");
+    public static string Themes => Path.Combine(Root, "themes");
+
+    /// <summary>Папка тем прежних версий (theme) — читается, если осталась после обновления поверх.</summary>
+    public static string LegacyThemes => Path.Combine(Root, "theme");
     public static string Languages => Path.Combine(Root, "language");
 
     /// <summary>Файлы *.json в папке ресурсов (пусто, если папки нет).</summary>

@@ -263,6 +263,11 @@ internal static class SelfTest
         Check("theme: пакет minecraft.zip (theme.ts, img) — пользовательская тема с прямыми углами и сценой",
             minecraft is { Dark: true, Corners: 0, Background: "minecraft" } && minecraft.Images.ContainsKey("grass_side") && minecraft.Images.ContainsKey("stone"),
             minecraft == null ? "нет темы" : string.Join(",", minecraft.Images.Keys));
+        Notices.Clear();
+        ThemeStore.Apply("minecraft");
+        Check("theme/minecraft: скрипт в песочнице запущен (рисует поверх фона, добавил окно «Верстак»)",
+            ThemeScripts.HasFrame && ThemeScripts.Windows.Count == 1 && Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
+        ThemeScripts.Stop();
         Check("theme: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
         foreach (var theme in ThemeStore.All)
         {
@@ -337,6 +342,25 @@ internal static class SelfTest
             var zipped = ThemeStore.All.FirstOrDefault(t => t.Id == "zip-theme");
             Check("Своя тема .ts читается", ts is { Dark: true, Custom: true } && ts.AccentColor.ToArgb() == Color.Red.ToArgb(), Texts());
             Check("Своя тема .zip: картинка фона и 2 кадра", zipped is { Custom: true, Picture: not null } && zipped.Frames.Count == 2 && Notices.All.Count == 0, Texts());
+
+            // Песочница: скрипту не видны .NET, модули и сеть, а бесконечный цикл останавливается по тайм-ауту.
+            using (var zip = System.IO.Compression.ZipFile.Open(Path.Combine(custom, "sandbox.zip"), System.IO.Compression.ZipArchiveMode.Create))
+            {
+                using (var writer = new StreamWriter(zip.CreateEntry("theme.ts").Open())) writer.Write("export default { id: 'sandbox', name: { ru: 'S', en: 'S' } };");
+                using (var writer = new StreamWriter(zip.CreateEntry("scripts/a.js").Open()))
+                    writer.Write("theme.log('probe:' + typeof importNamespace + ',' + typeof System + ',' + typeof require + ',' + typeof fetch + ',' + typeof XMLHttpRequest);");
+                using (var writer = new StreamWriter(zip.CreateEntry("scripts/b.js").Open())) writer.Write("while (true) {}");
+            }
+            Notices.Clear();
+            ThemeStore.Load();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            ThemeStore.Apply("sandbox");
+            watch.Stop();
+            Check("Скрипт темы: нет доступа к .NET, модулям и сети",
+                Notices.All.Any(n => n.Text.EndsWith("probe:undefined,undefined,undefined,undefined,undefined")), Texts());
+            Check("Скрипт темы: бесконечный цикл остановлен за секунду, программа работает",
+                watch.ElapsedMilliseconds < 1500 && Notices.All.Any(n => n.Level == NoticeLevel.Warning && n.Text.Contains("b.js")), $"{watch.ElapsedMilliseconds} мс; " + Texts());
+            ThemeScripts.Stop();
             Directory.Delete(AppPaths.Themes, recursive: true);
 
             // Удалено всё: встроенные драйверы, язык и тема, одно общее уведомление.

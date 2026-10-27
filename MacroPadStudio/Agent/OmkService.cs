@@ -5,11 +5,11 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.Agent;
 
 /// <summary>
-/// Фоновая служба OMK_Studio-Service: тот же exe с ключом --service, без окна. Выполняет действия кнопок
-/// (громкость, треки, системные действия…), когда окно программы закрыто. Это не служба Windows: те работают
-/// в отдельном сеансе 0 и не получают нажатий пользователя, поэтому служба запускается при входе в Windows
-/// (HKCU\...\Run). Пока открыта программа, служба отпускает служебные клавиши, а после её закрытия перечитывает
-/// настройки и пресет и снова берёт их.
+/// Помощник фоновой службы OMK_Studio-Service: тот же exe с ключом --service, без окна, в сеансе пользователя.
+/// Выполняет действия кнопок (громкость, треки, системные действия…), когда окно программы закрыто. Запускает его
+/// служба Windows (<see cref="WinService"/>) или, без прав администратора, автозагрузка (HKCU\...\Run). Пока открыта
+/// программа, помощник отпускает служебные клавиши и прячет значок в трее, после её закрытия перечитывает настройки
+/// и пресет и снова берёт их. В трее у помощника — выбор пресета службы.
 /// </summary>
 internal static class OmkService
 {
@@ -51,8 +51,15 @@ internal static class OmkService
 
     public static void Remove()
     {
-        using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.DeleteValue(Name, throwOnMissingValue: false);
+        RemoveAutorun();
         Stop();
+    }
+
+    /// <summary>Убирает только запись автозагрузки (помощника дальше запускает служба Windows).</summary>
+    public static void RemoveAutorun()
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+        key.DeleteValue(Name, throwOnMissingValue: false);
     }
 
     public static void Reinstall()
@@ -126,12 +133,15 @@ internal static class OmkService
         readonly System.Windows.Forms.Timer _timer = new() { Interval = 1500 };
         readonly RegisteredWaitHandle _pauseWait, _stopWait;
         readonly HoldFilter _holdFilter = new();
+        readonly NotifyIcon _tray = new();
         List<(int Slot, ControlId Control, PadAction Action)> _actions = new();
         bool _paused = true;
 
         public ServiceContext()
         {
             _ = _owner.Handle;
+            _tray.Icon = UI.Theme.SmallIcon;
+            _tray.Text = Name;
             _agent.Triggered += OnTrigger;
             _pauseWait = ThreadPool.RegisterWaitForSingleObject(_pause, (_, _) => Post(Pause), null, Timeout.Infinite, false);
             _stopWait = ThreadPool.RegisterWaitForSingleObject(_stop, (_, _) => Post(ExitThread), null, Timeout.Infinite, false);
@@ -151,6 +161,31 @@ internal static class OmkService
             bool app = AppIsRunning;
             if (app && !_paused) Pause();
             else if (!app && _paused) Resume();
+            // Значок помощника — только когда окна программы нет (иначе в трее было бы два значка).
+            _tray.Visible = !app;
+        }
+
+        /// <summary>Меню значка: пресет службы, открыть программу.</summary>
+        void BuildTrayMenu(AppSettings settings)
+        {
+            var menu = new ContextMenuStrip();
+            if (Environment.ProcessPath is string exe)
+                menu.Items.Add(new ToolStripMenuItem(L.F("tray.open", "Открыть {0}", Branding.AppName), null, (_, _) =>
+                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory })?.Dispose()));
+            menu.Items.Add(UI.MainForm.ServicePresetMenu(settings.ServicePreset, preset =>
+            {
+                try
+                {
+                    var fresh = SettingsStore.LoadSettings();
+                    fresh.ServicePreset = preset;
+                    SettingsStore.Save(fresh);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
+                Resume();
+            }));
+            var old = _tray.ContextMenuStrip;
+            _tray.ContextMenuStrip = menu;
+            old?.Dispose();
         }
 
         void Pause()
@@ -183,6 +218,7 @@ internal static class OmkService
                     .Select(x => (x.Action.TriggerSlot!.Value, x.Control, x.Action))
                     .ToList();
                 _agent.Apply(_actions.Select(a => a.Slot));
+                BuildTrayMenu(settings);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
@@ -210,6 +246,9 @@ internal static class OmkService
             if (disposing)
             {
                 _timer.Dispose();
+                _tray.Visible = false;
+                _tray.ContextMenuStrip?.Dispose();
+                _tray.Dispose();
                 _pauseWait.Unregister(null);
                 _stopWait.Unregister(null);
                 _agent.Dispose();

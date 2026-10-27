@@ -5,8 +5,9 @@ using OshiMakiKey.Model;
 namespace OshiMakiKey.UI;
 
 /// <summary>
-/// Страница настроек внутри главного окна: разделы слева, содержимое справа. Изменения применяются по «Готово»
-/// (событие <see cref="Done"/>), «Отмена» — <see cref="Cancelled"/>. Служба OMK_Studio-Service управляется сразу кнопками.
+/// Страница настроек внутри главного окна: разделы слева, содержимое справа. Тема и язык применяются сразу при выборе
+/// (<see cref="AppearancePreview"/>: окно перестраивается, а страница пересоздаётся с теми же правками), остальное — по
+/// «Готово» (<see cref="Done"/>). «Отмена» (<see cref="Cancelled"/>) возвращает и тему с языком, какими они были при открытии.
 /// </summary>
 internal sealed class SettingsPage : UserControl
 {
@@ -28,6 +29,17 @@ internal sealed class SettingsPage : UserControl
 
     /// <summary>Тема или язык изменились — главное окно перестроит содержимое.</summary>
     public bool AppearanceChanged { get; private set; }
+
+    /// <summary>Тема и язык на момент открытия настроек — к ним возвращает «Отмена».</summary>
+    public string OriginalTheme { get; private set; }
+    public string OriginalLanguage { get; private set; }
+
+    /// <summary>Выбранные, но ещё не применённые тема и язык (для <see cref="AppearancePreview"/>).</summary>
+    public string PendingTheme => _theme;
+    public string PendingLanguage => _language;
+
+    /// <summary>Выбрали тему или язык — окно применяет их сразу и пересоздаёт страницу (<see cref="Recreate"/>).</summary>
+    public event EventHandler? AppearancePreview;
     public bool DriverChanged { get; private set; }
     public bool RerunSetup { get; private set; }
     public bool ShowTour { get; private set; }
@@ -42,8 +54,8 @@ internal sealed class SettingsPage : UserControl
         _startPage = startPage;
         _settings = settings;
         _connected = connected;
-        _theme = ThemeStore.Current.Id;
-        _language = L.Code;
+        _theme = OriginalTheme = ThemeStore.Current.Id;
+        _language = OriginalLanguage = L.Code;
         _driverId = settings.DriverId;
         _layerCount = settings.LayerCount;
         _autostart = Autostart.IsEnabled;
@@ -233,16 +245,20 @@ internal sealed class SettingsPage : UserControl
     void BuildAppearance()
     {
         var page = Page();
-        page.Controls.Add(Hint(L.T("settings.appearance.hint", "Тема меняет цвета окна, рисунка платы и всех диалогов. Стандартные темы лежат в папке theme (light и dark), свои — в theme\\custom.")));
+        page.Controls.Add(Hint(L.T("settings.appearance.hint", "Тема меняет цвета окна, рисунка платы и всех диалогов. Стандартные темы лежат в папке themes (light и dark), свои — в themes\\custom.")));
         var picker = new ThemePicker(_theme, ContentWidth);
-        picker.Picked += (_, id) => _theme = id;
+        picker.Picked += (_, id) =>
+        {
+            _theme = id;
+            AppearancePreview?.Invoke(this, EventArgs.Empty);
+        };
         page.Controls.Add(picker);
     }
 
     void BuildLanguage()
     {
         var page = Page();
-        page.Controls.Add(Hint(L.T("settings.language.hint", "Языковые пакеты лежат в папке language. Перевод применится после «Готово».")));
+        page.Controls.Add(Hint(L.T("settings.language.hint", "Языковые пакеты лежат в папке language. Язык меняется сразу, «Отмена» вернёт прежний.")));
         var cards = Cards();
         var languages = L.Available.Count > 0 ? L.Available : new[] { new LanguageInfo(L.BuiltInCode, L.T("menu.language.builtin", "Русский (встроенный)"), "") };
         foreach (var language in languages)
@@ -258,6 +274,7 @@ internal sealed class SettingsPage : UserControl
             {
                 _language = language.Code;
                 foreach (var other in cards.Controls.OfType<SelectCard>()) other.Selected = other == card;
+                AppearancePreview?.Invoke(this, EventArgs.Empty);
             };
             cards.Controls.Add(card);
         }
@@ -343,17 +360,24 @@ internal sealed class SettingsPage : UserControl
         page.Controls.Add(Hint(L.F("settings.service.hint",
             "{0} выполняет громкость, треки и другие действия кнопок, когда окно программы закрыто. Она запускается вместе с Windows, не показывает окон и уступает клавиши, пока открыта программа.",
             OmkService.Name)));
-        // Частый вопрос: «службы нет в services.msc». Это сделано намеренно — объясняем, где её искать.
-        page.Controls.Add(Hint(L.F("settings.service.where",
-            "Это не служба из списка «Службы» Windows: такие службы работают в отдельном сеансе без доступа к клавиатуре, звуку и окнам. {0} — фоновый процесс в автозагрузке: «Диспетчер задач → Автозагрузка», процесс OshiMakiKeyStudio.exe.",
-            OmkService.Name)));
 
-        _serviceStatus =new Label { AutoSize = true, Font = Theme.Strong, Margin = new Padding(0, 0, 0, Theme.S(14)) };
+        _serviceStatus = new Label { AutoSize = true, Font = Theme.Strong, Margin = new Padding(0, 0, 0, Theme.S(14)), MaximumSize = new Size(ContentWidth, 0) };
         page.Controls.Add(_serviceStatus);
         UpdateServiceStatus();
 
+        // Служба Windows: видна в «Службах», сама запускает помощника в сеансе пользователя (службам недоступны клавиатура и звук).
+        page.Controls.Add(Section(L.T("settings.service.windows", "Служба Windows")));
+        page.Controls.Add(Hint(L.T("settings.service.windows.hint", "Видна в списке «Службы» как OMK Studio Service и запускается до входа в Windows. Службы сами не имеют доступа к клавиатуре и звуку, поэтому она запускает помощника в вашем сеансе и перезапускает его при сбое. Установка и удаление спросят права администратора.")));
+        var windows = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Window, Margin = new Padding(0, 0, 0, Theme.S(10)) };
+        windows.Controls.Add(ActionButton(L.T("settings.service.windows.install", "Установить службу Windows"), (_, _) => WindowsServiceCommand(install: true), primary: true));
+        windows.Controls.Add(ActionButton(L.T("settings.service.windows.remove", "Удалить службу Windows"), (_, _) => WindowsServiceCommand(install: false)));
+        page.Controls.Add(windows);
+
+        // Без прав администратора: помощник в автозагрузке пользователя (как в прежних версиях).
+        page.Controls.Add(Section(L.T("settings.service.autorun", "Автозагрузка без прав администратора")));
+        page.Controls.Add(Hint(L.T("settings.service.autorun.hint", "Тот же помощник запускается при входе в Windows из «Диспетчер задач → Автозагрузка». Если установлена служба Windows, автозагрузка не нужна.")));
         var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Window, Margin = new Padding(0, 0, 0, Theme.S(10)) };
-        row.Controls.Add(ActionButton(L.T("settings.service.install", "Установить и запустить"), (_, _) => ServiceCommand(OmkService.Install), primary: true));
+        row.Controls.Add(ActionButton(L.T("settings.service.install", "Установить и запустить"), (_, _) => ServiceCommand(OmkService.Install)));
         row.Controls.Add(ActionButton(L.T("settings.service.reinstall", "Переустановить"), (_, _) => ServiceCommand(OmkService.Reinstall)));
         row.Controls.Add(ActionButton(L.T("settings.service.remove", "Удалить службу"), (_, _) => ServiceCommand(OmkService.Remove)));
         page.Controls.Add(row);
@@ -387,10 +411,42 @@ internal sealed class SettingsPage : UserControl
         }
     }
 
+    /// <summary>Установка или удаление службы Windows: тот же exe с правами администратора (запрос UAC).</summary>
+    void WindowsServiceCommand(bool install)
+    {
+        UseWaitCursor = true;
+        bool ok = WinService.RunElevated(install ? "--install-winservice" : "--remove-winservice");
+        UseWaitCursor = false;
+        if (ok && install && OmkService.IsInstalled)
+        {
+            // Помощника теперь запускает служба — запись автозагрузки только мешала бы.
+            try { OmkService.RemoveAutorun(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+        }
+        if (!ok)
+            ThemedDialog.Show(this, Branding.AppName, L.T("settings.service.windows", "Служба Windows"),
+                L.T("settings.service.windows.failed", "Не получилось: права администратора не выданы или Windows отказала. Можно пользоваться автозагрузкой без прав администратора."),
+                new[] { L.T("button.ok", "ОК") }, DialogKind.Warning, cancelIndex: 0);
+        UpdateServiceStatus();
+    }
+
     void UpdateServiceStatus()
     {
         if (_serviceStatus == null) return;
-        bool installed = OmkService.IsInstalled, running = OmkService.IsRunning;
+        bool running = OmkService.IsRunning;
+        var windows = WinService.Status;
+        if (windows != null)
+        {
+            bool started = windows == System.ServiceProcess.ServiceControllerStatus.Running;
+            _serviceStatus.Text = !WinService.PathMatches
+                ? L.T("settings.service.windows.moved", "● Служба Windows указывает на другую папку программы — переустановите её")
+                : started && running ? L.T("settings.service.windows.running", "● Служба Windows работает, помощник запущен")
+                : started ? L.T("settings.service.windows.waiting", "● Служба Windows работает, помощник запустится после входа в Windows")
+                : L.T("settings.service.windows.stopped", "● Служба Windows установлена, но остановлена");
+            _serviceStatus.ForeColor = WinService.PathMatches && started ? Theme.Success : Theme.Warning;
+            return;
+        }
+        bool installed = OmkService.IsInstalled;
         _serviceStatus.Text = installed && running ? L.T("settings.service.running", "● Служба установлена и работает")
             : installed ? L.T("settings.service.stopped", "● Служба установлена, но не запущена")
             : L.T("settings.service.absent", "○ Служба не установлена");
@@ -421,10 +477,8 @@ internal sealed class SettingsPage : UserControl
         page.Controls.Add(folders);
 
         page.Controls.Add(Section(L.T("settings.files.updates", "Обновления")));
-        var updates = ActionButton(L.T("menu.updates", "Проверить обновления и файлы"), (_, _) => { }, enabled: false);
-        _tips.SetToolTip(updates, L.T("menu.updates.soon", "Скоро"));
-        page.Controls.Add(updates);
-        page.Controls.Add(Hint(L.T("settings.updates.hint", "Проверка новой версии и целостности файлов программы появится в следующих версиях.")));
+        page.Controls.Add(ActionButton(L.T("menu.updates", "Проверить обновления и файлы"), async (_, _) => await UpdateDialog.RunAsync(this)));
+        page.Controls.Add(Hint(L.T("settings.updates.check", "Сравнивает версию с последним релизом на GitHub и проверяет, что файлы драйверов, тем и языков на месте и читаются. Сама программа ничего не скачивает.")));
 
         page.Controls.Add(Section(L.T("settings.files.help", "Знакомство с программой")));
         var help = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Window };
@@ -447,6 +501,31 @@ internal sealed class SettingsPage : UserControl
     }
 
     // ───────────────────────── Применение ─────────────────────────
+
+    /// <summary>Выбор темы так же, как щелчком по кружку (для проверки в режиме снимка).</summary>
+    internal void PickTheme(string id)
+    {
+        _theme = id;
+        AppearancePreview?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Та же страница в новых теме и языке: открыт тот же раздел, несохранённые правки и исходные тема с языком — те же.</summary>
+    public SettingsPage Recreate()
+    {
+        var page = new SettingsPage(_settings, _connected, Math.Max(0, _nav.FindIndex(n => n.Selected)))
+        {
+            OriginalTheme = OriginalTheme,
+            OriginalLanguage = OriginalLanguage,
+            _driverId = _driverId,
+            _layerCount = _layerCount,
+            _autostart = _autostart,
+            _tray = _tray,
+            _confirm = _confirm,
+            _noRepeat = _noRepeat,
+            _servicePreset = _servicePreset,
+        };
+        return page;
+    }
 
     void Apply()
     {

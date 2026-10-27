@@ -11,7 +11,7 @@ namespace OshiMakiKey.UI;
 /// Тема оформления (скин): {"id", "name": {"ru", "en"}, "dark", "colors": {"accent": "#2563EB", …}}.
 /// Обязательных цветов нет: недостающие выводятся из основных (window, surface, text, accent).
 /// Тема — файл .json или .ts (объект в синтаксисе TypeScript), либо пакет: .zip или папка с theme.ts/theme.json
-/// и папками img (картинки), animate (кадры анимированного фона) и scripts (только хранятся, не выполняются).
+/// и папками img (картинки), animate (кадры анимированного фона) и scripts (*.js — выполняются в песочнице, <see cref="ThemeScripts"/>).
 /// </summary>
 internal sealed class ThemeDef
 {
@@ -36,7 +36,7 @@ internal sealed class ThemeDef
     /// <summary>Скорость кадров из папки animate (кадров в секунду).</summary>
     public int AnimationFps { get; set; } = 10;
 
-    /// <summary>Пользовательская тема (папка theme/custom), а не стандартная светлая или тёмная.</summary>
+    /// <summary>Пользовательская тема (папка themes/custom), а не стандартная светлая или тёмная.</summary>
     [JsonIgnore] public bool Custom { get; set; }
 
     /// <summary>Картинки из img пакета по имени файла без расширения.</summary>
@@ -44,6 +44,9 @@ internal sealed class ThemeDef
 
     /// <summary>Кадры анимированного фона из animate (по порядку имён файлов).</summary>
     [JsonIgnore] public List<Image> Frames { get; } = new();
+
+    /// <summary>Скрипты из scripts пакета: имя файла → текст JavaScript.</summary>
+    [JsonIgnore] public Dictionary<string, string> Scripts { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     [JsonIgnore] public Image? Picture { get; set; }
 
@@ -91,8 +94,8 @@ internal static class ThemeStore
     const int MaxFrames = 240;
 
     /// <summary>
-    /// Темы из папки theme: light и dark — стандартные, custom — пользовательские (файлы .json/.ts, пакеты .zip и
-    /// папки с theme.ts). Файлы прямо в theme тоже читаются как пользовательские. Тем нет совсем — уведомление.
+    /// Темы из папки themes (и theme прежних версий): light и dark — стандартные, custom — пользовательские (файлы .json/.ts, пакеты .zip и
+    /// папки с theme.ts). Файлы прямо в themes тоже читаются как пользовательские. Тем нет совсем — уведомление.
     /// </summary>
     public static void Load()
     {
@@ -104,6 +107,9 @@ internal static class ThemeStore
             (Path.Combine(AppPaths.Themes, "dark"), true, false),
             (Path.Combine(AppPaths.Themes, "custom"), null, true),
             (AppPaths.Themes, null, true),
+            (Path.Combine(AppPaths.LegacyThemes, "light"), false, false),
+            (Path.Combine(AppPaths.LegacyThemes, "dark"), true, false),
+            (Path.Combine(AppPaths.LegacyThemes, "custom"), null, true),
         };
         foreach (var (folder, dark, custom) in sources)
         {
@@ -187,7 +193,9 @@ internal static class ThemeStore
         foreach (var entry in entries.Where(e => In(e, "animate") && IsImage(e) && e.Length <= MaxImageBytes)
                      .OrderBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(MaxFrames))
             theme.Frames.Add(LoadImage(entry));
-        // Папка scripts только хранится в пакете: программа никогда не выполняет код из тем.
+        // Скрипты только читаются здесь как текст; выполняет их песочница ThemeScripts, когда тему включают.
+        foreach (var entry in entries.Where(e => In(e, "scripts") && e.Path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) && e.Length <= 256 * 1024))
+            using (var reader = new StreamReader(entry.Open())) theme.Scripts[entry.Path] = reader.ReadToEnd();
 
         var picture = theme.BackgroundImage?.Replace('\\', '/').TrimStart('/');
         theme.Picture = picture != null && theme.Images.TryGetValue(Path.GetFileNameWithoutExtension(picture), out var named) ? named
@@ -243,6 +251,7 @@ internal static class ThemeStore
 
         Current = pick;
         Theme.Apply(pick);
+        ThemeScripts.Start(pick);
         ToolStripManager.Renderer = Theme.CreateRenderer();
     }
 

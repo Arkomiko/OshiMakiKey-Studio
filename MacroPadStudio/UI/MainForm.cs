@@ -83,6 +83,9 @@ internal sealed class MainForm : Form
     /// <summary>Для --snapshot --page settings|about|setup: снимок окна с открытой страницей.</summary>
     public string? SnapshotPage { get; set; }
 
+    /// <summary>Для --snapshot --page settings --preview-theme id: выбрать тему в открытых настройках (проверка мгновенного применения).</summary>
+    public string? SnapshotPreviewTheme { get; set; }
+
     /// <summary>
     /// Самопроверка перетаскивания (--drop-test): по очереди тащит клавишу 5 на каждое действие ручки и проверяет,
     /// что действие оказалось там, куда его бросили. Возвращает строки PASS/FAIL.
@@ -285,7 +288,14 @@ internal sealed class MainForm : Form
         help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.howItWorks", "Как это работает"), null, (_, _) => StartTour()) { ShortcutKeys = Keys.F1 });
         help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.setup", "Мастер первого запуска…"), null, (_, _) => ShowSetup()));
         help.DropDownItems.Add(new ToolStripSeparator());
-        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.updates", "Проверить обновления и файлы")) { Enabled = false, ToolTipText = L.T("menu.updates.soon", "Скоро") });
+        help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.updates", "Проверить обновления и файлы"), null, async (_, _) => await UpdateDialog.RunAsync(this)));
+        // Окна, которые добавил скрипт текущей темы.
+        if (ThemeScripts.Windows.Count > 0)
+        {
+            help.DropDownItems.Add(new ToolStripSeparator());
+            foreach (var window in ThemeScripts.Windows)
+                help.DropDownItems.Add(new ToolStripMenuItem(window.Menu, null, (_, _) => ThemeScripts.OpenWindow(window, this)));
+        }
         help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(new ToolStripMenuItem(L.T("menu.about", "О программе"), null, (_, _) => ShowAbout()));
 
@@ -452,14 +462,15 @@ internal sealed class MainForm : Form
             ColumnCount = 2,
             RowCount = 1,
             BackColor = Theme.Window,
-            Padding = new Padding(Theme.S(16)),
+            // У темы со своим фоном промежутки шире, чтобы фон было видно.
+            Padding = new Padding(Theme.S(ThemeBackdrop.Active ? 30 : 16)),
         };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.S(470)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var left = Card(_pad);
-        left.Margin = new Padding(0, 0, Theme.S(16), 0);
+        left.Margin = new Padding(0, 0, Theme.S(ThemeBackdrop.Active ? 30 : 16), 0);
         var right = Card(_editor);
         right.Margin = new Padding(0);
         grid.Controls.Add(left, 0, 0);
@@ -502,12 +513,36 @@ internal sealed class MainForm : Form
         menu.Items.Add(open);
         menu.Items.Add(new ToolStripMenuItem(L.T("menu.write", "Записать в устройство"), null, async (_, _) => await WriteToDeviceAsync()));
         menu.Items.Add(new ToolStripMenuItem(L.T("menu.monitor", "Монитор нажатий…"), null, (_, _) => ShowMonitor()));
+        menu.Items.Add(ServicePresetMenu(_settings.ServicePreset, preset =>
+        {
+            _settings.ServicePreset = preset;
+            SaveNow();
+        }));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(L.T("menu.exit", "Выход"), null, (_, _) => ExitApp()));
 
         var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
         old?.Dispose();
+    }
+
+    /// <summary>Подменю «Пресет службы»: «Активный пресет» или любой сохранённый; отмечен выбранный.</summary>
+    internal static ToolStripMenuItem ServicePresetMenu(string? current, Action<string?> pick)
+    {
+        var menu = new ToolStripMenuItem(L.T("settings.service.preset", "Пресет службы"));
+        void Fill()
+        {
+            menu.DropDownItems.Clear();
+            menu.DropDownItems.Add(new ToolStripMenuItem(L.T("settings.service.active", "Активный пресет"), null, (_, _) => { current = null; pick(null); })
+                { Checked = current == null });
+            menu.DropDownItems.Add(new ToolStripSeparator());
+            foreach (var name in PresetStore.Names())
+                menu.DropDownItems.Add(new ToolStripMenuItem(name, null, (_, _) => { current = name; pick(name); }) { Checked = current == name });
+        }
+        Fill();
+        // Список пресетов мог измениться — перечитываем при каждом открытии.
+        menu.DropDownOpening += (_, _) => Fill();
+        return menu;
     }
 
     // ───────────────────────── Окно и трей ─────────────────────────
@@ -565,9 +600,14 @@ internal sealed class MainForm : Form
             {
                 "about" => new AboutPage(_settings, Transition.Capture(this, null)),
                 "setup" => new SetupPage(_settings),
-                _ => new SettingsPage(_settings, null),
+                _ => WiredSettings(new SettingsPage(_settings, null)),
             });
             await Task.Delay(400);
+            if (SnapshotPreviewTheme != null && _pages.TryPeek(out var top) && top is SettingsPage settingsPage)
+            {
+                settingsPage.PickTheme(SnapshotPreviewTheme);
+                await Task.Delay(700);
+            }
         }
         if (SnapshotTourStep >= 0)
         {
@@ -1087,7 +1127,31 @@ internal sealed class MainForm : Form
     {
         if (_tour != null || _pages.Count > 0) return;
         var page = new SettingsPage(_settings, _device != null ? (_device.VendorId, _device.ProductId) : null);
-        page.Cancelled += (_, _) => ClosePage();
+        WireSettings(page);
+        ShowPage(page);
+    }
+
+    SettingsPage WiredSettings(SettingsPage page)
+    {
+        WireSettings(page);
+        return page;
+    }
+
+    void WireSettings(SettingsPage page)
+    {
+        page.AppearancePreview += (_, _) => BeginInvoke(() => PreviewAppearance(page));
+        page.Cancelled += (_, _) =>
+        {
+            ClosePage();
+            // «Отмена» возвращает тему и язык, какими они были при открытии настроек.
+            if (ThemeStore.Current.Id != page.OriginalTheme || L.Code != page.OriginalLanguage)
+            {
+                _settings.Theme = page.OriginalTheme;
+                _settings.Language = page.OriginalLanguage;
+                ApplyAppearance();
+                SaveNow();
+            }
+        };
         page.Done += (_, _) =>
         {
             ClosePage();
@@ -1098,7 +1162,31 @@ internal sealed class MainForm : Form
             if (page.RerunSetup) BeginInvoke(ShowSetup);
             else if (page.ShowTour) BeginInvoke(StartTour);
         };
-        ShowPage(page);
+    }
+
+    /// <summary>В настройках выбрали тему или язык: применяем сразу и заменяем страницу такой же, но в новом оформлении.</summary>
+    void PreviewAppearance(SettingsPage page)
+    {
+        if (!_pages.TryPeek(out var top) || top != page) return;
+        Transition.Run(this, () =>
+        {
+            _settings.Theme = page.PendingTheme;
+            _settings.Language = page.PendingLanguage;
+            ApplyAppearance();
+            var fresh = page.Recreate();
+            WireSettings(fresh);
+            SuspendLayout();
+            _pages.Pop();
+            Controls.Remove(page);
+            _pages.Push(fresh);
+            fresh.Bounds = ClientRectangle;
+            fresh.Dock = DockStyle.Fill;
+            Controls.Add(fresh);
+            fresh.BringToFront();
+            ResumeLayout(true);
+            fresh.Select();
+        });
+        BeginInvoke(page.Dispose);
     }
 
     void ShowAbout()

@@ -18,10 +18,10 @@ namespace OshiMakiKey.UI;
 /// </summary>
 internal sealed class MonitorForm : Form
 {
-    const int MaxLines = 800;
+    const int MaxLines = LogFiles.MonitorLogLines; // и в окне, и в monitor.log — не больше 500 событий
     const int RepeatGapMs = 400; // ближе — это повтор удерживаемой кнопки (прошивка повторяет тап каждые ~110 мс)
 
-    enum EntryKind { Key, Media, Mouse, Program, Info, Other, Raw }
+    enum EntryKind { Key, Release, Media, Mouse, Program, Info, Other, Raw }
 
     /// <summary>Строка монитора. ToString — текстом (для «Копировать всё» и журнала).</summary>
     sealed record Entry(DateTime Time, EntryKind Kind, string Title, string Detail, bool FromPad)
@@ -36,12 +36,16 @@ internal sealed class MonitorForm : Form
     readonly string _logPath = LogFiles.MonitorLog;
     readonly List<HidInputReader> _readers = new();
     readonly System.Windows.Forms.Timer _deviceTimer = new() { Interval = 800 };
-    StreamWriter? _file;
+    CappedLog? _file;
 
     // Модификаторы, зажатые платой: из них и следующей клавиши складывается сочетание «Ctrl + C».
     bool _ctrl, _shift, _alt, _win, _keyInChord;
     string _lastTitle = "";
     DateTime _lastTime;
+
+    // Когда плата нажала клавишу или мультимедиа-кнопку — чтобы при отпускании показать, сколько её держали.
+    readonly Dictionary<Keys, (DateTime At, string Title)> _keysDown = new();
+    (DateTime At, string Title)? _mediaDown;
 
     /// <summary>По условию на действие — название кнопки текущего слоя, которой оно назначено (null — ничьё).</summary>
     public Func<Func<PadAction, bool>, string?>? FindControl { get; set; }
@@ -108,8 +112,8 @@ internal sealed class MonitorForm : Form
             StartReaders();
         };
 
-        LogFiles.Cleanup();
-        _file = LogFiles.OpenAppend(_logPath, out string? logError);
+        string? logError = CappedLog.Append(_logPath, Array.Empty<string>(), LogFiles.MonitorLogLines);
+        _file = LogFiles.OpenMonitorLog();
         Info(L.F("monitor.opened", "──── Монитор открыт {0:dd.MM.yyyy HH:mm:ss}, {1} {2}", DateTime.Now, Branding.AppName, Branding.Version));
         if (logError != null) Info(L.F("monitor.logError", "Не удалось открыть monitor.log: {0}", logError));
         Theme.ApplyTo(this);
@@ -144,6 +148,7 @@ internal sealed class MonitorForm : Form
         AddPadEntry(EntryKind.Key, "Ctrl + C", null, UiText.Title(ControlId.Key1));
         AddPadEntry(EntryKind.Key, "F16", null, L.T("monitor.serviceKey.detail", "служебная клавиша для программы"));
         LogAgent(MediaCatalog.NameOf(0xCD), "Клавиша 5 · F16");
+        Append(new Entry(DateTime.Now, EntryKind.Release, "Ctrl + C", L.F("monitor.held", "держали {0:0.00} с", 0.12), true));
         AddPadEntry(EntryKind.Media, MediaCatalog.NameOf(0xEA), null, "Ручка: поворот влево");
         AddPadEntry(EntryKind.Media, MediaCatalog.NameOf(0xEA), null, "Ручка: поворот влево");
         Append(new Entry(DateTime.Now, EntryKind.Raw, "03EA00", L.T("monitor.media", "Мультимедиа"), true));
@@ -256,6 +261,12 @@ internal sealed class MonitorForm : Form
             case RawHidEvent { Usages.Length: > 0 } hid when hid.UsagePage == 0x0C:
                 foreach (var usage in hid.Usages)
                     AddPadEntry(EntryKind.Media, MediaCatalog.NameOf(usage), a => a.Kind == ActionKind.Media && a.MediaCode == usage);
+                _mediaDown = (DateTime.Now, string.Join(" + ", hid.Usages.Select(MediaCatalog.NameOf)));
+                break;
+            case RawHidEvent { Usages.Length: 0 } hid when hid.UsagePage == 0x0C && _mediaDown is { } media:
+                // Пустой отчёт мультимедиа — кнопку отпустили.
+                Released(media.Title, media.At);
+                _mediaDown = null;
                 break;
             case RawHidEvent { Usages.Length: > 0 } hid:
                 AddPadEntry(EntryKind.Media, L.T("monitor.system", "Система") + " " + string.Join(" + ", hid.Usages.Select(u => $"0x{u:X2}")), null);
@@ -277,18 +288,31 @@ internal sealed class MonitorForm : Form
             case Keys.Menu or Keys.LMenu or Keys.RMenu: Modifier(ref _alt, down); return;
             case Keys.LWin or Keys.RWin: Modifier(ref _win, down); return;
         }
-        if (!down) return;
+        if (!down)
+        {
+            if (_keysDown.Remove(key.Key, out var pressed)) Released(pressed.Title, pressed.At);
+            return;
+        }
         _keyInChord = true;
 
         if (key.Key is >= Keys.F13 and <= Keys.F24)
         {
             // Служебная клавиша: её ловит программа и выполняет действие (оно появится строкой «Программа»).
             AddPadEntry(EntryKind.Key, ChordName(key.Key.ToString()), null, L.T("monitor.serviceKey.detail", "служебная клавиша для программы"));
+            _keysDown[key.Key] = (DateTime.Now, ChordName(key.Key.ToString()));
             return;
         }
         var chord = new KeyChord { Ctrl = _ctrl, Shift = _shift, Alt = _alt, Win = _win, Key = KeyCatalog.FromVirtualKey(key.Key) };
         string title = chord.Key != 0 ? BindingText.Chord(chord) : ChordName(key.Key.ToString());
         AddPadEntry(EntryKind.Key, title, chord.Key == 0 ? null : a => a.Kind == ActionKind.Keys && a.Chords.Any(c => SameChord(c, chord)));
+        _keysDown[key.Key] = (DateTime.Now, title);
+    }
+
+    /// <summary>Строка «отпущена»: что отпустили и сколько держали.</summary>
+    void Released(string title, DateTime at)
+    {
+        double seconds = (DateTime.Now - at).TotalSeconds;
+        Append(new Entry(DateTime.Now, EntryKind.Release, title, L.F("monitor.held", "держали {0:0.00} с", seconds), true));
     }
 
     void Modifier(ref bool state, bool down)
@@ -386,6 +410,7 @@ internal sealed class MonitorForm : Form
     static string KindName(EntryKind kind) => kind switch
     {
         EntryKind.Key => L.T("monitor.kind.key", "Клавиша"),
+        EntryKind.Release => L.T("monitor.kind.release", "Отпущена"),
         EntryKind.Media => L.T("monitor.media", "Мультимедиа"),
         EntryKind.Mouse => L.T("monitor.mouse", "Мышь"),
         EntryKind.Program => L.T("monitor.program", "Программа"),
@@ -404,14 +429,7 @@ internal sealed class MonitorForm : Form
 
         // На диск — только плата, программа и служебные строки; сырые отчёты и чужие устройства не пишем.
         if (!entry.FromPad || entry.Kind == EntryKind.Raw) return;
-        try
-        {
-            _file?.WriteLine(entry.ToString());
-        }
-        catch (IOException)
-        {
-            _file = null;
-        }
+        _file?.WriteLine(entry.ToString());
     }
 
     /// <summary>Строка: время, цветная метка вида события, сочетание клавишами-«колпачками» или текст, пояснение.</summary>
@@ -456,7 +474,7 @@ internal sealed class MonitorForm : Form
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
         x += badgeWidth + Theme.S(12);
 
-        if (entry.Kind == EntryKind.Key && entry.FromPad)
+        if (entry.Kind is EntryKind.Key or EntryKind.Release && entry.FromPad)
             x = DrawKeycaps(g, entry.Title, x, bounds);
         else
         {

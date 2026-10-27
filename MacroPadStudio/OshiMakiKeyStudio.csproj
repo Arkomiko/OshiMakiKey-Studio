@@ -13,16 +13,20 @@
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
     <Product>OshiMakiKey Studio</Product>
     <Description>Настройка китайских макро-клавиатур CH552 и CH57x</Description>
-    <Version>0.1.5</Version>
-    <InformationalVersion>0.1.5b</InformationalVersion>
+    <Version>0.1.6</Version>
+    <InformationalVersion>0.1.6b</InformationalVersion>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Драйверы, темы и языки лежат рядом с exe отдельными файлами: их можно менять и дополнять без пересборки. -->
   <ItemGroup>
     <None Include="..\drivers\*.json" Link="drivers\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <None Include="..\theme\**\*.json;..\theme\**\*.ts;..\theme\**\*.zip" Link="theme\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\themes\**\*.json;..\themes\**\*.ts;..\themes\**\*.zip" Link="themes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="..\language\*.json" Link="language\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Jint" Version="4.1.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
   </ItemGroup>
 
 </Project>

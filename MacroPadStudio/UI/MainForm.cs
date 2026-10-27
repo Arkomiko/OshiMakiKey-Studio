@@ -163,7 +163,7 @@ internal sealed class MainForm : Form
     void BuildUi(ControlId? select)
     {
         SuspendLayout();
-        foreach (var control in Controls.Cast<Control>().Where(c => !_pages.Contains(c) && c != _tour).ToList())
+        foreach (var control in Controls.Cast<Control>().Where(c => !_pages.Contains(c) && c != _tour && !Transition.IsCover(c)).ToList())
         {
             Controls.Remove(control);
             control.Dispose();
@@ -234,6 +234,7 @@ internal sealed class MainForm : Form
         _registeredSlots = new(); // строка состояния новая — пусть агент заново покажет своё состояние
         ApplyAgent();
         SetStatus(L.T("status.ready", "Выберите клавишу или действие ручки слева, настройте его справа и нажмите «Записать в устройство»."));
+        ThemeBackdrop.Update(this);
     }
 
     void BuildMenu()
@@ -562,7 +563,7 @@ internal sealed class MainForm : Form
         {
             ShowPage(SnapshotPage switch
             {
-                "about" => new AboutPage(_settings),
+                "about" => new AboutPage(_settings, Transition.Capture(this, null)),
                 "setup" => new SetupPage(_settings),
                 _ => new SettingsPage(_settings, null),
             });
@@ -1030,7 +1031,7 @@ internal sealed class MainForm : Form
     // ───────────────────────── Страницы в окне ─────────────────────────
 
     /// <summary>Показывает страницу на месте основного содержимого окна (меню, шапка и схема прячутся).</summary>
-    void ShowPage(Control page)
+    void ShowPage(Control page) => Transition.Run(this, () =>
     {
         SuspendLayout();
         if (_pages.TryPeek(out var top)) top.Visible = false;
@@ -1043,11 +1044,11 @@ internal sealed class MainForm : Form
         page.BringToFront();
         ResumeLayout(true);
         page.Select();
-    }
+    });
 
     void HideMain()
     {
-        _hiddenMain = Controls.Cast<Control>().Where(c => c.Visible && !_pages.Contains(c)).ToList();
+        _hiddenMain = Controls.Cast<Control>().Where(c => c.Visible && !_pages.Contains(c) && !Transition.IsCover(c)).ToList();
         foreach (var control in _hiddenMain) control.Visible = false;
     }
 
@@ -1055,28 +1056,32 @@ internal sealed class MainForm : Form
     void ClosePage()
     {
         if (!_pages.TryPop(out var page)) return;
-        SuspendLayout();
-        Controls.Remove(page);
-        if (_pages.TryPeek(out var top)) top.Visible = true;
-        else
+        Transition.Run(this, () =>
         {
-            foreach (var control in _hiddenMain.Where(c => !c.IsDisposed)) control.Visible = true;
-            _hiddenMain.Clear();
-        }
-        ResumeLayout(true);
+            SuspendLayout();
+            Controls.Remove(page);
+            if (_pages.TryPeek(out var top)) top.Visible = true;
+            else
+            {
+                foreach (var control in _hiddenMain.Where(c => !c.IsDisposed)) control.Visible = true;
+                _hiddenMain.Clear();
+            }
+            ResumeLayout(true);
+        });
         // Страницу закрывают из её же обработчика щелчка — освобождаем после выхода из него.
         BeginInvoke(page.Dispose);
     }
 
     /// <summary>Тема или язык сменились: перечитать ресурсы и перестроить содержимое этого же окна.</summary>
-    void ApplyAppearance()
+    void ApplyAppearance() => Transition.Run(this, () =>
     {
         Notices.Clear();
         Program.LoadResources(_settings);
         _settings.Normalize();
         BuildUi(_pad.Selected);
+        BackColor = Theme.Window;
         if (IsHandleCreated) Theme.DarkTitleBar(this);
-    }
+    });
 
     void ShowSettings()
     {
@@ -1099,7 +1104,7 @@ internal sealed class MainForm : Form
     void ShowAbout()
     {
         if (_tour != null || _pages.Count > 0) return;
-        var page = new AboutPage(_settings);
+        var page = new AboutPage(_settings, Transition.Capture(this, null));
         page.Closed += (_, _) => ClosePage();
         ShowPage(page);
     }
@@ -1116,6 +1121,7 @@ internal sealed class MainForm : Form
             // Мастер перерисуется сам; окну остаётся сменить фон и цвет заголовка.
             BackColor = Theme.Window;
             Theme.DarkTitleBar(this);
+            ThemeBackdrop.Update(this);
             ScheduleSave();
         };
         page.WriteCheckRequested += (_, _) => ShowWizard(page);

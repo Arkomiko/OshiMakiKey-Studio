@@ -251,14 +251,18 @@ internal static class SelfTest
             string.Join(", ", DriverStore.All.Select(d => d.Id)));
         Check("drivers: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
 
-        // Темы: 12 штук, у каждой полный и правильный набор цветов.
+        // Темы: 13 светлых и 13 тёмных стандартных плюс пользовательская Minecraft, у каждой полный набор цветов.
         Notices.Clear();
         ThemeStore.Load();
         var colorKeys = typeof(Theme).GetProperties(BindingFlags.Public | BindingFlags.Static)
             .Where(p => p.PropertyType == typeof(Color))
             .Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name[1..])
             .ToHashSet();
-        Check("theme: 13 светлых и 13 тёмных", ThemeStore.All.Count(t => !t.Dark) == 13 && ThemeStore.All.Count(t => t.Dark) == 13, string.Join(", ", ThemeStore.All.Select(t => t.Id)));
+        Check("theme: 13 светлых и 13 тёмных стандартных", ThemeStore.Standard.Count(t => !t.Dark) == 13 && ThemeStore.Standard.Count(t => t.Dark) == 13, string.Join(", ", ThemeStore.All.Select(t => t.Id)));
+        var minecraft = ThemeStore.CustomThemes.FirstOrDefault(t => t.Id == "minecraft");
+        Check("theme: пакет minecraft.zip (theme.ts, img) — пользовательская тема с прямыми углами и сценой",
+            minecraft is { Dark: true, Corners: 0, Background: "minecraft" } && minecraft.Images.ContainsKey("grass_side") && minecraft.Images.ContainsKey("stone"),
+            minecraft == null ? "нет темы" : string.Join(",", minecraft.Images.Keys));
         Check("theme: файлы без ошибок", Notices.All.Count == 0, string.Join(" | ", Notices.All.Select(n => n.Text)));
         foreach (var theme in ThemeStore.All)
         {
@@ -312,6 +316,28 @@ internal static class SelfTest
             ThemeStore.Apply("dark");
             Check("Нет тем: одно уведомление «тем»", Notices.All.Count == 1 && Notices.All[0].Text == Missing("тем") && Notices.All[0].SuggestUpdate, Texts());
             Check("Нет тем: тема встроенная (светлая)", ThemeStore.Current.Id == "" && !Theme.Dark && Theme.Surface.ToArgb() == Color.White.ToArgb());
+
+            // Свои темы в форматах .ts и .zip (с картинкой в img и кадрами в animate); скрипты не выполняются.
+            string custom = Path.Combine(AppPaths.Themes, "custom");
+            Directory.CreateDirectory(custom);
+            File.WriteAllText(Path.Combine(custom, "ts-theme.ts"),
+                "// комментарий\nexport default {\n  id: 'ts-theme', name: { ru: 'TS', en: 'TS' }, dark: true,\n  colors: { accent: '#FF0000', }, // хвост\n} satisfies Theme;\n");
+            using (var zip = System.IO.Compression.ZipFile.Open(Path.Combine(custom, "zip-theme.zip"), System.IO.Compression.ZipArchiveMode.Create))
+            {
+                using (var writer = new StreamWriter(zip.CreateEntry("theme.ts").Open()))
+                    writer.Write("export default { id: 'zip-theme', name: { ru: 'ZIP', en: 'ZIP' }, backgroundImage: 'img/bg.png', colors: { accent: '#00FF00' } };");
+                using var pixel = new Bitmap(2, 2);
+                foreach (var entry in new[] { "img/bg.png", "animate/01.png", "animate/02.png" })
+                    using (var stream = zip.CreateEntry(entry).Open()) pixel.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+                using (var writer = new StreamWriter(zip.CreateEntry("scripts/run.js").Open())) writer.Write("throw 1;");
+            }
+            Notices.Clear();
+            ThemeStore.Load();
+            var ts = ThemeStore.All.FirstOrDefault(t => t.Id == "ts-theme");
+            var zipped = ThemeStore.All.FirstOrDefault(t => t.Id == "zip-theme");
+            Check("Своя тема .ts читается", ts is { Dark: true, Custom: true } && ts.AccentColor.ToArgb() == Color.Red.ToArgb(), Texts());
+            Check("Своя тема .zip: картинка фона и 2 кадра", zipped is { Custom: true, Picture: not null } && zipped.Frames.Count == 2 && Notices.All.Count == 0, Texts());
+            Directory.Delete(AppPaths.Themes, recursive: true);
 
             // Удалено всё: встроенные драйверы, язык и тема, одно общее уведомление.
             Directory.Delete(AppPaths.Languages, recursive: true);

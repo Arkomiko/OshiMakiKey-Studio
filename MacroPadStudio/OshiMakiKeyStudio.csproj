@@ -21,7 +21,7 @@
   <!-- Драйверы, темы и языки лежат рядом с exe отдельными файлами: их можно менять и дополнять без пересборки. -->
   <ItemGroup>
     <None Include="..\drivers\*.json" Link="drivers\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <None Include="..\theme\*.json" Link="theme\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\theme\**\*.json;..\theme\**\*.ts;..\theme\**\*.zip" Link="theme\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="..\language\*.json" Link="language\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 

@@ -80,7 +80,7 @@ internal static class Program
             SettingsStore.AttachPresets(settings);
             Form form = formName switch
             {
-                "about" => PageHost(new AboutPage(settings)),
+                "about" => PageHost(new AboutPage(settings, null)),
                 "setup-0" or "setup-1" or "setup-2" => PageHost(new SetupPage(settings, formName[^1] - '0')),
                 "overwrite" => new FormShot(() => ThemedDialog.Show(null, Branding.AppName, L.T("drop.overwrite.heading", "Внимание, вы хотите перезаписать комбинацию на клавише!"),
                     L.F("drop.overwrite.text", "Сейчас на «{0}»: {1}\nБудет: {2}", "Клавиша 4", "Ctrl + V", "Предыдущий трек"),

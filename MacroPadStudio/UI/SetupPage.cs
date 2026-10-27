@@ -39,15 +39,19 @@ internal sealed class SetupPage : UserControl
     public void Rebuild() => Rerender();
 
     // Перерисовка из обработчика щелчка: сам щёлкнутый элемент при этом удаляется, поэтому — после выхода из обработчика.
-    void Rerender() => BeginInvoke(new Action(Render));
+    // change (смена темы или языка) выполняется уже под снимком старого вида, чтобы переход был плавным.
+    void Rerender(Action? change = null) => BeginInvoke(new Action(() => Transition.Run(this, () =>
+    {
+        change?.Invoke();
+        Render();
+    })));
 
     // ───────────────────────── Отрисовка ─────────────────────────
 
     void Render()
     {
         SuspendLayout();
-        foreach (var control in Controls.Cast<Control>().ToList()) control.Dispose();
-        Controls.Clear();
+        foreach (var control in Controls.Cast<Control>().Where(c => !Transition.IsCover(c)).ToList()) control.Dispose();
         foreach (var image in _images) image.Dispose();
         _images.Clear();
 
@@ -143,12 +147,14 @@ internal sealed class SetupPage : UserControl
             };
             card.Click += (_, _) =>
             {
-                _settings.Language = language.Code;
-                L.Load(language.Code);
-                KeyCatalog.Rebuild();
-                MediaCatalog.Rebuild();
-                AppearanceChanged?.Invoke(this, EventArgs.Empty);
-                Rerender();
+                Rerender(() =>
+                {
+                    _settings.Language = language.Code;
+                    L.Load(language.Code);
+                    KeyCatalog.Rebuild();
+                    MediaCatalog.Rebuild();
+                    AppearanceChanged?.Invoke(this, EventArgs.Empty);
+                });
             };
             cards.Controls.Add(card);
         }
@@ -159,30 +165,14 @@ internal sealed class SetupPage : UserControl
     {
         page.Controls.Add(Title(L.T("setup.theme.title", "Выберите тему")));
         page.Controls.Add(Hint(L.T("setup.theme.hint", "Тема меняет цвета всей программы. Выбор применяется сразу — этот мастер тоже перекрасится."), width));
-        var cards = Cards(width);
-        var themes = ThemeStore.All.Count > 0 ? ThemeStore.All : new[] { ThemeStore.Current };
-        foreach (var theme in themes)
+        var picker = new ThemePicker(ThemeStore.Current.Id, width);
+        picker.Picked += (_, id) => Rerender(() =>
         {
-            var preview = ThemeStore.Preview(theme, Theme.S(160), Theme.S(100));
-            _images.Add(preview);
-            var card = new SelectCard
-            {
-                Text = theme.Title,
-                Picture = preview,
-                PictureOnTop = true,
-                Size = new Size(Theme.S(184), Theme.S(150)),
-                Selected = theme.Id == ThemeStore.Current.Id,
-            };
-            card.Click += (_, _) =>
-            {
-                _settings.Theme = theme.Id;
-                ThemeStore.Apply(theme.Id);
-                AppearanceChanged?.Invoke(this, EventArgs.Empty);
-                Rerender();
-            };
-            cards.Controls.Add(card);
-        }
-        page.Controls.Add(cards);
+            _settings.Theme = id;
+            ThemeStore.Apply(id);
+            AppearanceChanged?.Invoke(this, EventArgs.Empty);
+        });
+        page.Controls.Add(picker);
     }
 
     void BuildDevice(FlowLayoutPanel page, int width)

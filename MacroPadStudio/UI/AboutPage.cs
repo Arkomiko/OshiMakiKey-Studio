@@ -4,56 +4,71 @@ using OshiMakiKey.Model;
 
 namespace OshiMakiKey.UI;
 
-/// <summary>Страница «О программе» внутри главного окна: карточка по центру с шапкой цвета акцента, сведениями и ссылками.</summary>
+/// <summary>
+/// Страница «О программе» внутри главного окна: поверх полупрозрачного снимка окна — закруглённая карточка
+/// с шапкой цвета акцента, а сведения и ссылки сгруппированы в закруглённые рамки.
+/// </summary>
 internal sealed class AboutPage : UserControl
 {
-    readonly List<Image> _images = new();
+    // Фон страницы прозрачен на 70%: окно под ней видно, но приглушено цветом темы.
+    const int BackdropOpacity = 255 * 30 / 100;
 
-    readonly Panel _card = new();
+    readonly List<Image> _images = new();
+    readonly Bitmap? _backdrop;
+    readonly RoundPanel _card;
+    readonly FlowLayoutPanel _body;
+    readonly FlowLayoutPanel _buttons;
 
     public event EventHandler? Closed;
 
-    public AboutPage(AppSettings settings)
+    public AboutPage(AppSettings settings, Bitmap? backdrop)
     {
+        _backdrop = backdrop;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         Font = Theme.Body;
         BackColor = Theme.Window;
+        ForeColor = Theme.Text;
         Dock = DockStyle.Fill;
-        _card.Size = new Size(Theme.S(560), Theme.S(600));
-        _card.BackColor = Theme.Surface;
 
-        var header = new Banner { Dock = DockStyle.Top, Height = Theme.S(150) };
+        int radius = Theme.S(16);
+        // Ширина текста — с запасом под вертикальную полосу прокрутки, иначе при её появлении правый край букв обрезается.
+        int inner = Theme.S(560) - Theme.S(26) - Theme.S(18) - SystemInformation.VerticalScrollBarWidth - 2;
+        _card = new RoundPanel { Fill = Theme.Surface, Line = Theme.Border, Radius = radius, Width = Theme.S(560), Padding = new Padding(1, 1, 1, radius) };
+        var header = new Banner(radius) { Dock = DockStyle.Top, Height = Theme.S(150) };
 
-        var body = new TableLayoutPanel
+        _body = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            Padding = new Padding(Theme.S(28), Theme.S(18), Theme.S(28), Theme.S(8)),
-            BackColor = Theme.Surface,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
             AutoScroll = true,
+            Padding = new Padding(Theme.S(26), Theme.S(18), Theme.S(18), 0),
+            BackColor = Theme.Surface,
         };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        void Row(string caption, Control value)
-        {
-            body.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(0, Theme.S(6), Theme.S(16), Theme.S(6)) });
-            value.Anchor = AnchorStyles.Left;
-            body.Controls.Add(value);
-        }
-
-        var description = new Label
+        _body.Controls.Add(new Label
         {
             Text = L.T("about.description", "Настройка китайских макро-клавиатур на чипах CH552 и CH57x: клавиши, ручки, мультимедиа, мышь и системные действия. Работает без установки — всё хранится рядом с программой."),
             AutoSize = true,
             ForeColor = Theme.Text,
-            MaximumSize = new Size(Theme.S(460), 0),
+            MaximumSize = new Size(inner, 0),
             Margin = new Padding(0, 0, 0, Theme.S(14)),
-        };
-        body.Controls.Add(description);
-        body.SetColumnSpan(description, 2);
+        });
+
+        // Рамка со сведениями: драйвер, тема, язык (папка данных показана в настройках).
+        var details = Frame(inner);
+        var table = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, BackColor = details.Fill, Dock = DockStyle.Top };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        void Row(string caption, Control value)
+        {
+            table.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = Theme.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(0, Theme.S(5), Theme.S(16), Theme.S(5)) });
+            value.Anchor = AnchorStyles.Left;
+            table.Controls.Add(value);
+        }
 
         var driver = settings.EffectiveDriver;
-        var driverRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), BackColor = Theme.Surface };
+        var driverRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), BackColor = details.Fill };
         var icon = DriverIcon.Draw(driver, Theme.S(36), Theme.S(24));
         _images.Add(icon);
         driverRow.Controls.Add(new PictureBox { Image = icon, Size = icon.Size, Margin = new Padding(0, Theme.S(3), Theme.S(8), 0) });
@@ -61,56 +76,79 @@ internal sealed class AboutPage : UserControl
         Row(L.T("about.driver", "Драйвер"), driverRow);
         Row(L.T("about.theme", "Тема"), Value(ThemeStore.Current.Title));
         Row(L.T("about.language", "Язык"), Value(L.Available.FirstOrDefault(l => l.Code == L.Code)?.Name ?? L.T("menu.language.builtin", "Русский (встроенный)")));
-        Row(L.T("about.data", "Данные"), Link(AppPaths.UserData, () => Open("explorer.exe", $"\"{AppPaths.UserData}\"")));
+        details.Controls.Add(table);
+        _body.Controls.Add(Fit(details, table, inner));
 
-        var credits = new Label
+        // Рамка с благодарностями: откуда взяты протоколы плат.
+        var creditsFrame = Frame(inner);
+        var credits = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = creditsFrame.Fill, Dock = DockStyle.Top };
+        credits.Controls.Add(new Label
         {
             Text = L.T("about.credits", "Протоколы плат восстановлены по открытым проектам:"),
             AutoSize = true,
             ForeColor = Theme.Muted,
-            Margin = new Padding(0, Theme.S(16), 0, Theme.S(4)),
-        };
-        body.Controls.Add(credits);
-        body.SetColumnSpan(credits, 2);
+            MaximumSize = new Size(inner - Theme.S(32), 0),
+            Margin = new Padding(0, 0, 0, Theme.S(4)),
+        });
         foreach (var (name, url) in new[]
                  {
                      ("kriomant/ch57x-keyboard-tool", "https://github.com/kriomant/ch57x-keyboard-tool"),
                      ("rOzzy1987/MacroPad", "https://github.com/rOzzy1987/MacroPad"),
                  })
-        {
-            var link = Link(name, () => Open(url, null));
-            body.Controls.Add(link);
-            body.SetColumnSpan(link, 2);
-        }
+            credits.Controls.Add(Link(name, inner - Theme.S(32), () => Open(url, null)));
+        creditsFrame.Controls.Add(credits);
+        _body.Controls.Add(Fit(creditsFrame, credits, inner));
 
-        var bottom = new FlowLayoutPanel
+        _buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom,
-            Height = Theme.S(62),
+            AutoSize = true,
             FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(Theme.S(22), Theme.S(12), Theme.S(22), Theme.S(12)),
-            BackColor = Theme.Window,
+            WrapContents = false,
+            BackColor = Color.Transparent,
         };
         var close = ThemedDialog.MakeButton(L.T("button.close", "Закрыть"), primary: true);
         close.Click += (_, _) => Closed?.Invoke(this, EventArgs.Empty);
-        bottom.Controls.Add(close);
+        _buttons.Controls.Add(close);
         var site = ThemedDialog.MakeButton(L.T("about.github", "Страница на GitHub"), primary: false);
         site.Click += (_, _) => Open(Branding.Website, null);
-        bottom.Controls.Add(site);
+        _buttons.Controls.Add(site);
 
-        _card.Controls.Add(body);
-        _card.Controls.Add(bottom);
+        _card.Controls.Add(_body);
         _card.Controls.Add(header);
         Controls.Add(_card);
-        ForeColor = Theme.Text;
+        Controls.Add(_buttons);
         Theme.Style(this);
     }
 
-    // Карточка всегда по центру страницы.
-    protected override void OnResize(EventArgs e)
+    // Под карточкой — снимок окна, приглушённый цветом темы; у темы со своим фоном страница прозрачна и виден он.
+    protected override void OnPaintBackground(PaintEventArgs e)
     {
-        base.OnResize(e);
-        _card.Location = new Point(Math.Max(0, (ClientSize.Width - _card.Width) / 2), Math.Max(0, (ClientSize.Height - _card.Height) / 2));
+        if (BackColor.A < 255)
+        {
+            base.OnPaintBackground(e);
+            return;
+        }
+        var g = e.Graphics;
+        g.Clear(Theme.Window);
+        if (_backdrop == null) return;
+        g.DrawImageUnscaled(_backdrop, 0, 0);
+        using var veil = new SolidBrush(Color.FromArgb(255 - BackdropOpacity, Theme.Window));
+        g.FillRectangle(veil, ClientRectangle);
+    }
+
+    // Карточка по высоте содержимого (но не выше окна), вместе с кнопками — по центру страницы.
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        base.OnLayout(e);
+        if (_card == null || _buttons == null) return;
+        int gap = Theme.S(14);
+        int content = _body.Controls.Cast<Control>().Sum(c => c.Height + c.Margin.Vertical) + _body.Padding.Vertical + Theme.S(12);
+        int wanted = Theme.S(150) + content + _card.Padding.Vertical;
+        int room = ClientSize.Height - _buttons.Height - gap - Theme.S(24);
+        _card.Height = Math.Max(Theme.S(240), Math.Min(wanted, room));
+        int top = Math.Max(0, (ClientSize.Height - _card.Height - gap - _buttons.Height) / 2);
+        _card.Location = new Point(Math.Max(0, (ClientSize.Width - _card.Width) / 2), top);
+        _buttons.Location = new Point(_card.Right - _buttons.Width, _card.Bottom + gap);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -123,9 +161,26 @@ internal sealed class AboutPage : UserControl
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    static Label Value(string text) => new() { Text = text, AutoSize = true, Font = Theme.Strong, ForeColor = Theme.Text, Margin = new Padding(0, Theme.S(6), 0, Theme.S(6)) };
+    static RoundPanel Frame(int width) => new()
+    {
+        Fill = Theme.Blend(Theme.Surface, Theme.Window, 0.55f),
+        Line = Theme.Border,
+        Radius = Theme.S(12),
+        Width = width,
+        Padding = new Padding(Theme.S(16), Theme.S(10), Theme.S(16), Theme.S(10)),
+        Margin = new Padding(0, 0, 0, Theme.S(12)),
+    };
 
-    static LinkLabel Link(string text, Action click)
+    // Высота рамки — по содержимому, раскладываемому в её ширину.
+    static RoundPanel Fit(RoundPanel frame, Control content, int width)
+    {
+        frame.Height = content.GetPreferredSize(new Size(width - frame.Padding.Horizontal, 0)).Height + frame.Padding.Vertical;
+        return frame;
+    }
+
+    static Label Value(string text) => new() { Text = text, AutoSize = true, Font = Theme.Strong, ForeColor = Theme.Text, Margin = new Padding(0, Theme.S(5), 0, Theme.S(5)) };
+
+    static LinkLabel Link(string text, int maxWidth, Action click)
     {
         var link = new LinkLabel
         {
@@ -135,7 +190,7 @@ internal sealed class AboutPage : UserControl
             ActiveLinkColor = Theme.AccentDark,
             VisitedLinkColor = Theme.Accent,
             LinkBehavior = LinkBehavior.HoverUnderline,
-            MaximumSize = new Size(Theme.S(360), 0),
+            MaximumSize = new Size(maxWidth, 0),
             Margin = new Padding(0, Theme.S(4), 0, Theme.S(4)),
         };
         link.LinkClicked += (_, _) => click();
@@ -156,18 +211,48 @@ internal sealed class AboutPage : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) foreach (var image in _images) image.Dispose();
+        if (disposing)
+        {
+            foreach (var image in _images) image.Dispose();
+            _backdrop?.Dispose();
+        }
         base.Dispose(disposing);
     }
 
-    /// <summary>Шапка: градиент акцента, крупная иконка, название и версия.</summary>
+    /// <summary>Панель-рамка со скруглёнными углами; за углами виден фон родителя.</summary>
+    sealed class RoundPanel : Panel
+    {
+        public Color Fill { get; init; }
+        public Color Line { get; init; }
+        public int Radius { get; init; }
+
+        public RoundPanel()
+        {
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var path = Theme.Rounded(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius);
+            using (var brush = new SolidBrush(Fill)) g.FillPath(brush, path);
+            using (var pen = new Pen(Line)) g.DrawPath(pen, path);
+        }
+    }
+
+    /// <summary>Шапка: градиент акцента со скруглёнными верхними углами, крупная иконка, название и версия.</summary>
     sealed class Banner : Control
     {
         readonly Image _icon;
+        readonly int _radius;
 
-        public Banner()
+        public Banner(int radius)
         {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            _radius = radius;
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
             using var stream = new MemoryStream(Theme.BuildIconBytes());
             using var icon = new Icon(stream, 64, 64);
             _icon = icon.ToBitmap();
@@ -178,6 +263,9 @@ internal sealed class AboutPage : UserControl
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float s = Theme.Scale;
+            // Скругление только сверху: нижние углы уходят за край шапки.
+            using var shape = Theme.Rounded(new RectangleF(0, 0, Width, Height + _radius * 2), _radius);
+            g.SetClip(shape);
             using (var brush = new LinearGradientBrush(ClientRectangle, Theme.Accent, Theme.AccentPressed, 25f))
                 g.FillRectangle(brush, ClientRectangle);
             // Декоративные круги в духе ручки устройства.
@@ -186,6 +274,7 @@ internal sealed class AboutPage : UserControl
                 g.DrawEllipse(pen, Width - 150 * s, -60 * s, 220 * s, 220 * s);
                 g.DrawEllipse(pen, Width - 90 * s, 40 * s, 120 * s, 120 * s);
             }
+            g.ResetClip();
             float size = 72 * s;
             var iconRect = new RectangleF(28 * s, (Height - size) / 2, size, size);
             using (var shadow = Theme.Rounded(new RectangleF(iconRect.X, iconRect.Y + 4 * s, size, size), 16 * s))

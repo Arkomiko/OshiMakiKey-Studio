@@ -142,7 +142,7 @@ internal sealed class SettingsPage : UserControl
         list.Controls.Add(item);
     }
 
-    void Select(NavItem item)
+    void Select(NavItem item) => Transition.Run(this, () =>
     {
         foreach (var nav in _nav) nav.Selected = nav == item;
         _pageTitle.Text = item.Caption;
@@ -154,7 +154,7 @@ internal sealed class SettingsPage : UserControl
         Theme.Style(_content);
         _content.ResumeLayout(true);
         _content.AutoScrollPosition = Point.Empty;
-    }
+    });
 
     FlowLayoutPanel Page()
     {
@@ -233,27 +233,10 @@ internal sealed class SettingsPage : UserControl
     void BuildAppearance()
     {
         var page = Page();
-        page.Controls.Add(Hint(L.T("settings.appearance.hint", "Тема меняет цвета окна, рисунка платы и всех диалогов. Темы лежат в папке theme — их можно править и добавлять свои.")));
-        var cards = Cards();
-        var themes = ThemeStore.All.Count > 0 ? ThemeStore.All : new[] { ThemeStore.Current };
-        foreach (var theme in themes)
-        {
-            var card = new SelectCard
-            {
-                Text = theme.Title,
-                Picture = Keep(ThemeStore.Preview(theme, Theme.S(160), Theme.S(100))),
-                PictureOnTop = true,
-                Size = new Size(Theme.S(180), Theme.S(150)),
-                Selected = theme.Id == _theme,
-            };
-            card.Click += (_, _) =>
-            {
-                _theme = theme.Id;
-                foreach (var other in cards.Controls.OfType<SelectCard>()) other.Selected = other == card;
-            };
-            cards.Controls.Add(card);
-        }
-        page.Controls.Add(cards);
+        page.Controls.Add(Hint(L.T("settings.appearance.hint", "Тема меняет цвета окна, рисунка платы и всех диалогов. Стандартные темы лежат в папке theme (light и dark), свои — в theme\\custom.")));
+        var picker = new ThemePicker(_theme, ContentWidth);
+        picker.Picked += (_, id) => _theme = id;
+        page.Controls.Add(picker);
     }
 
     void BuildLanguage()

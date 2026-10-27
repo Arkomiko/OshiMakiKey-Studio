@@ -99,6 +99,7 @@ internal static class Theme
     {
         var colors = Parse(theme.Colors);
         bool d = Dark = theme.Dark;
+        Corners = Math.Clamp(theme.Corners, 0f, 2f);
         Color Get(string key, Color fallback) => colors.TryGetValue(key, out var color) ? color : fallback;
         var white = Color.White;
         var black = Color.Black;
@@ -177,7 +178,7 @@ internal static class Theme
         (int)Math.Round(from.G + (to.G - from.G) * t),
         (int)Math.Round(from.B + (to.B - from.B) * t));
 
-    static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255;
+    public static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255;
 
     // ───────────────────────── Оформление стандартных элементов ─────────────────────────
 
@@ -311,10 +312,13 @@ internal static class Theme
 
     // ───────────────────────── Геометрия и иконка ─────────────────────────
 
+    /// <summary>Множитель скругления из темы: 0 — прямые углы у всех карточек, кнопок и клавиш.</summary>
+    public static float Corners { get; private set; } = 1f;
+
     public static GraphicsPath Rounded(RectangleF r, float radius)
     {
         var path = new GraphicsPath();
-        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
+        float d = Math.Min(radius * Corners * 2, Math.Min(r.Width, r.Height));
         if (d <= 0)
         {
             path.AddRectangle(r);

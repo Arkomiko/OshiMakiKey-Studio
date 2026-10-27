@@ -2,6 +2,8 @@
 
 [Русский](README.md) · [Беларуская](README.be.md) · [Українська](README.uk.md) · [Қазақша](README.kk.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [English (US)](README.en.md) · [English (UK)](README.en-GB.md) · **Deutsch**
 
+**⬇ [Installer (x64/x86) oder portable Version herunterladen](https://github.com/Arkomiko/OshiMakiKey-Studio/releases/latest)**
+
 Ein portables Programm zum Einrichten chinesischer Makro-Tastaturen mit **CH552 / CH57x**-Chips (USB `1189:8890`, `1189:8840`, `1189:8842`, `1189:8850`, `514C:8850`, `514C:8851` und verwandte): 3 bis 16 Tasten und bis zu 3 Drehknöpfe.
 Jeder Taste und jeder Knopfaktion (nach links drehen, drücken, nach rechts drehen) lässt sich zuweisen:
 

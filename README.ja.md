@@ -2,6 +2,8 @@
 
 [Русский](README.md) · [Беларуская](README.be.md) · [Українська](README.uk.md) · [Қазақша](README.kk.md) · [中文](README.zh.md) · **日本語** · [English (US)](README.en.md) · [English (UK)](README.en-GB.md) · [Deutsch](README.de.md)
 
+**⬇ [インストーラー（x64/x86）またはポータブル版をダウンロード](https://github.com/Arkomiko/OshiMakiKey-Studio/releases/latest)**
+
 **CH552 / CH57x** チップを使った中国製マクロキーボード（USB `1189:8890`、`1189:8840`、`1189:8842`、`1189:8850`、`514C:8850`、`514C:8851` など）を設定するポータブルプログラムです。キーは 3〜16 個、ロータリーノブは最大 3 個に対応します。
 各キーとノブの各動作（左回転、押下、右回転）に次を割り当てられます。
 

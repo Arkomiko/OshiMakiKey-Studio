@@ -2,6 +2,8 @@
 
 **Русский** · [Беларуская](README.be.md) · [Українська](README.uk.md) · [Қазақша](README.kk.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [English (US)](README.en.md) · [English (UK)](README.en-GB.md) · [Deutsch](README.de.md)
 
+**⬇ [Скачать установщик (x64/x86) или portable](https://github.com/Arkomiko/OshiMakiKey-Studio/releases/latest)**
+
 Portable-программа для настройки китайских макро-клавиатур на чипах **CH552 / CH57x** (USB `1189:8890`, `1189:8840`, `1189:8842`, `1189:8850`, `514C:8850`, `514C:8851` и родственных): от 3 до 16 клавиш и до 3 ручек-энкодеров.
 Каждой клавише и каждому действию ручки (поворот влево, нажатие, поворот вправо) можно назначить:
 

@@ -2,6 +2,8 @@
 
 [Русский](README.md) · [Беларуская](README.be.md) · [Українська](README.uk.md) · [Қазақша](README.kk.md) · [中文](README.zh.md) · [日本語](README.ja.md) · **English (US)** · [English (UK)](README.en-GB.md) · [Deutsch](README.de.md)
 
+**⬇ [Download the installer (x64/x86) or portable](https://github.com/Arkomiko/OshiMakiKey-Studio/releases/latest)**
+
 A portable configurator for Chinese macro keyboards based on **CH552 / CH57x** chips (USB `1189:8890`, `1189:8840`, `1189:8842`, `1189:8850`, `514C:8850`, `514C:8851` and related): from 3 to 16 keys and up to 3 rotary knobs.
 Every key and every knob action (turn left, press, turn right) can be assigned:
 

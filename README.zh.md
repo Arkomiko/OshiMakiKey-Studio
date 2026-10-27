@@ -2,6 +2,8 @@
 
 [Русский](README.md) · [Беларуская](README.be.md) · [Українська](README.uk.md) · [Қазақша](README.kk.md) · **中文** · [日本語](README.ja.md) · [English (US)](README.en.md) · [English (UK)](README.en-GB.md) · [Deutsch](README.de.md)
 
+**⬇ [下载安装程序（x64/x86）或便携版](https://github.com/Arkomiko/OshiMakiKey-Studio/releases/latest)**
+
 用于配置基于 **CH552 / CH57x** 芯片的国产宏键盘的便携程序（USB `1189:8890`、`1189:8840`、`1189:8842`、`1189:8850`、`514C:8850`、`514C:8851` 及同类设备）：3 到 16 个按键，最多 3 个旋钮编码器。
 每个按键和旋钮的每个动作（左转、按下、右转）都可以分配：
 
